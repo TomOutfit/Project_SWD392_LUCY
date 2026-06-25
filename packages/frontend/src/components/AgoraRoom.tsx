@@ -1,7 +1,7 @@
 // src/components/AgoraRoom.tsx
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen } from 'lucide-react';
+import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi } from 'lucide-react';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -14,9 +14,10 @@ import toast from 'react-hot-toast';
 export function AgoraRoom() {
   const {
     currentRoom, participants, handQueue, isMuted, isSpeaking, handRaised,
-    pinnedContent, isRecording, giftEvents, joinRoom, leaveRoom,
+    pinnedContent, isRecording, giftEvents, leaveRoom,
     handRaise, handLower, toggleMute, grantSpeak, revokeSpeak,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
+    latencyMs,
   } = useRoomStore();
 
   const { user, updateBalance } = useAuthStore();
@@ -59,7 +60,10 @@ export function AgoraRoom() {
 
   useEffect(() => {
     if (currentRoom && user) {
-      joinRoom(currentRoom.id);
+      const { joinRoom: doJoin, joiningRoomId } = useRoomStore.getState();
+      if (joiningRoomId !== currentRoom.id) {
+        doJoin(currentRoom.id);
+      }
     }
   }, [currentRoom?.id]);
 
@@ -139,6 +143,10 @@ export function AgoraRoom() {
           <div className="flex items-center gap-1 text-mist text-xs">
             <Users className="w-3.5 h-3.5" />
             {participants.length}
+          </div>
+          <div className="flex items-center gap-1 text-mist text-xs" title="Round-trip latency">
+            <Wifi className="w-3.5 h-3.5" />
+            <span className="font-mono">{latencyMs !== null ? `${latencyMs}ms` : '--'}</span>
           </div>
           <Button variant="ghost" size="sm" onClick={leaveRoom}>
             <PhoneOff className="w-4 h-4" />

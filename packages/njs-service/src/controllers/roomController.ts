@@ -3,7 +3,12 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../db/index.js';
 import { rooms, podcasts } from '../db/schema.js';
-import { eq, desc, and, asc } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
+import agora from 'agora-access-token';
+const { RtcTokenBuilder, RtcRole } = agora;
+
+const AGORA_APP_ID = process.env.AGORA_APP_ID as string | undefined;
+const AGORA_APP_CREDENTIAL = process.env.AGORA_APP_CREDENTIAL as string | undefined;
 
 export async function getRooms(req: Request, res: Response) {
   try {
@@ -27,28 +32,6 @@ export async function getRooms(req: Request, res: Response) {
   }
 }
 
-export async function createRoom(req: Request, res: Response) {
-  try {
-    const { name, hostId, hostName, hostPersonaId, hostRole, language, levelId, levelName } = req.body;
-    if (!name || !hostId || !language || !levelId) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const room = {
-      id: uuidv4(),
-      name, hostId, hostName, hostPersonaId, hostRole,
-      language: language.toUpperCase(), levelId, levelName,
-      isLive: true, state: 'Active', currentSubLevel: 1,
-      createdAt: new Date().toISOString(), participantCount: 1,
-    };
-
-    await db.insert(rooms).values(room);
-    res.status(201).json({ ...room, participants: [], pinnedContent: null });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to create room' });
-  }
-}
-
 export async function getPodcasts(req: Request, res: Response) {
   try {
     const all = await db.select().from(podcasts).orderBy(desc(podcasts.createdAt));
@@ -59,24 +42,33 @@ export async function getPodcasts(req: Request, res: Response) {
 }
 
 export async function getAgoraToken(req: Request, res: Response) {
-  // In production, use agora-access-token package with real AppID/AppCertificate
-  // For MVP, return a mock token
-  const channelName = req.query.channelName as string;
-  const uid = parseInt(req.query.uid as string) || Math.floor(Math.random() * 100000);
-  const expireSec = 3600;
+  try {
+    const channelName = (req.query.channelName as string | undefined) || 'default';
+    const uid = parseInt((req.query.uid as string | undefined) || '0', 10) || 0;
+    const expireSec = parseInt((req.query.expireSec as string | undefined) || '3600', 10) || 3600;
 
-  const mockToken = Buffer.from(JSON.stringify({
-    appId: 'MOCK_APP_ID',
-    channelName,
-    uid,
-    expiresAt: Date.now() + expireSec * 1000,
-    note: 'In production, use agora-access-token with real Agora credentials'
-  })).toString('base64');
+    if (!AGORA_APP_ID || !AGORA_APP_CREDENTIAL) {
+      return res.status(500).json({ error: 'Agora App ID / App Credential not configured on server' });
+    }
 
-  res.json({
-    token: mockToken,
-    channelName,
-    uid,
-    expiresAt: Date.now() + expireSec * 1000,
-  });
+    const privilegeExpiredTs = Math.floor(Date.now() / 1000) + expireSec;
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      AGORA_APP_ID,
+      AGORA_APP_CREDENTIAL,
+      channelName,
+      uid,
+      RtcRole.PUBLISHER,
+      privilegeExpiredTs,
+    );
+
+    res.json({
+      token,
+      channelName,
+      uid,
+      expiresAt: privilegeExpiredTs * 1000,
+    });
+  } catch (err) {
+    console.error('[AgoraToken] Failed to build token:', err);
+    res.status(500).json({ error: 'Failed to generate Agora token' });
+  }
 }

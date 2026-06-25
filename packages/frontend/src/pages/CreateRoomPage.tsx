@@ -29,8 +29,11 @@ export default function CreateRoomPage() {
       return;
     }
     connectSocket(user.id, user.displayName, user.personaId, user.role);
-    levelsApi.all().then(r => { setLevels(r.data); setLoading(false); });
-  }, []);
+    levelsApi.all().then(r => {
+      setLevels(r.data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [user?.id, navigate]);
 
   const filteredLevels = levels.filter(l => l.language === form.language);
   const selectedLevel = levels.find(l => l.id === form.levelId);

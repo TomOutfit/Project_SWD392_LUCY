@@ -1,7 +1,22 @@
 // src/stores/roomStore.ts
+/// <reference types="vite/client" />
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
+import AgoraRTC from 'agora-rtc-sdk-ng';
 import type { Room, Participant, ContentPin } from '@/types/index';
+
+// Keep a single shared client across store instances (module singleton)
+const sharedAgoraClient: any = (globalThis as any).__lucyAgoraClient ?? null;
+if (!(globalThis as any).__lucyAgoraClient) {
+  (globalThis as any).__lucyAgoraClient = sharedAgoraClient;
+}
+
+function getAgoraClient(): any {
+  if (!sharedAgoraClient) {
+    (globalThis as any).__lucyAgoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+  }
+  return (globalThis as any).__lucyAgoraClient;
+}
 
 interface RoomState {
   socket: Socket | null;
@@ -15,7 +30,9 @@ interface RoomState {
   pinnedContent: ContentPin | null;
   isRecording: boolean;
   recordingId: string | null;
-  pendingRoomId: string | null;
+  joiningRoomId: string | null;
+  latencyMs: number | null;
+  latencyTimer: number | null;
   giftEvents: Array<{ id: string; senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string }>;
   recommendation: {
     vocabulary: string[];
@@ -41,6 +58,10 @@ interface RoomState {
   closeRoom: () => void;
   clearGiftEvents: () => void;
   forceStageTransition: () => void;
+  startLatencyProbe: () => void;
+  stopLatencyProbe: () => void;
+  joinAgoraChannel: (userId: number) => Promise<void>;
+  leaveAgoraChannel: () => Promise<void>;
 }
 
 export const useRoomStore = create<RoomState>((set, get) => ({
@@ -55,14 +76,21 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   pinnedContent: null,
   isRecording: false,
   recordingId: null,
-  pendingRoomId: null,
+  joiningRoomId: null,
+  latencyMs: null,
+  latencyTimer: null,
   giftEvents: [],
   recommendation: null,
 
   connectSocket: (userId, userName, personaId, role, pendingRoomId) => {
     const existingSocket = get().socket;
-    if (existingSocket?.connected) return;
-    if (pendingRoomId) set({ pendingRoomId });
+    if (existingSocket?.connected) {
+      if (pendingRoomId) {
+        get().joinRoom(pendingRoomId);
+      }
+      return;
+    }
+    if (pendingRoomId) set({ joiningRoomId: pendingRoomId });
 
     const socket = io('http://localhost:3001', {
       auth: { userId, userName, personaId, role },
@@ -71,16 +99,26 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     socket.on('connect', () => {
       set({ socket, isConnected: true });
-      const roomToJoin = pendingRoomId || get().pendingRoomId;
+      const roomToJoin = get().joiningRoomId;
       if (roomToJoin) {
+        set({ joiningRoomId: null });
         socket.emit('join-room', { roomId: roomToJoin, user: socket.auth });
-        set({ pendingRoomId: null });
       }
+      const existing = get().latencyTimer;
+      if (existing) window.clearInterval(existing);
+      const timer = window.setInterval(() => {
+        try { socket.emit('ping', ({ t }: { t: number }) => set({ latencyMs: Date.now() - t })); } catch { /* noop */ }
+      }, 2000);
+      set({ latencyTimer: timer, latencyMs: null });
     });
-    socket.on('disconnect', () => set({ isConnected: false }));
+    socket.on('disconnect', () => {
+      const existing = get().latencyTimer;
+      if (existing) window.clearInterval(existing);
+      set({ isConnected: false, latencyTimer: null, latencyMs: null });
+    });
 
     socket.on('room-joined', ({ room }: { room: Room }) => {
-      set({ currentRoom: room, participants: room.participants || [], pinnedContent: room.pinnedContent });
+      set({ currentRoom: room, participants: room.participants || [], pinnedContent: room.pinnedContent, joiningRoomId: null });
     });
 
     socket.on('participant-joined', ({ participant }: { participant: Participant }) => {
@@ -137,7 +175,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       set({ isRecording: false, recordingId: null });
     });
 
-    socket.on('room-closed', () => {
+    socket.on('room-closed', async () => {
+      await get().leaveAgoraChannel();
       set({ currentRoom: null, participants: [], handQueue: [], recommendation: null });
     });
 
@@ -148,26 +187,43 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     socket.on('error', ({ message }: { message: string }) => {
       console.error('[Socket error]', message);
     });
+
+    socket.on('pong', (response: { t: number }) => {
+      const rtt = Date.now() - response.t;
+      set({ latencyMs: rtt });
+    });
   },
 
-  disconnectSocket: () => {
+  disconnectSocket: async () => {
     const socket = get().socket;
     if (socket) socket.disconnect();
-    set({ socket: null, isConnected: false, currentRoom: null, participants: [], handQueue: [], recommendation: null });
+    get().stopLatencyProbe();
+    await get().leaveAgoraChannel();
+    set({ socket: null, isConnected: false, currentRoom: null, participants: [], handQueue: [], recommendation: null, joiningRoomId: null, latencyMs: null });
   },
 
   joinRoom: (roomId) => {
-    const socket = get().socket;
-    if (!socket) return;
+    const { socket, joiningRoomId } = get();
+    if (!socket) {
+      set({ joiningRoomId: roomId });
+      return;
+    }
+    if (joiningRoomId === roomId) return;
+    if (!socket.connected) {
+      set({ joiningRoomId: roomId });
+      return;
+    }
+    set({ joiningRoomId: roomId });
     socket.emit('join-room', { roomId, user: socket.auth });
   },
 
-  leaveRoom: () => {
+  leaveRoom: async () => {
     const { socket, currentRoom } = get();
     if (socket && currentRoom) {
       socket.emit('leave-room', { roomId: currentRoom.id });
     }
-    set({ currentRoom: null, participants: [], handQueue: [], isMuted: true, isSpeaking: false, handRaised: false, recommendation: null });
+    await get().leaveAgoraChannel();
+    set({ currentRoom: null, participants: [], handQueue: [], isMuted: true, isSpeaking: false, handRaised: false, recommendation: null, joiningRoomId: null });
   },
 
   handRaise: () => {
@@ -234,7 +290,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     if (socket && currentRoom) {
       socket.emit('close-room', { roomId: currentRoom.id });
     }
-    set({ currentRoom: null, participants: [], handQueue: [], recommendation: null });
+    set({ currentRoom: null, participants: [], handQueue: [], recommendation: null, joiningRoomId: null });
   },
 
   forceStageTransition: () => {
@@ -245,4 +301,93 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   clearGiftEvents: () => set({ giftEvents: [] }),
+
+  startLatencyProbe: () => {
+    const s = get().socket;
+    if (!s?.connected) return;
+    const timer = window.setInterval(() => {
+      try { s.emit('ping', ({ t }: { t: number }) => {
+        const rtt = Date.now() - t;
+        set({ latencyMs: rtt });
+      }); } catch { /* noop */ }
+    }, 2000);
+    set({ latencyTimer: timer, latencyMs: null });
+  },
+
+  stopLatencyProbe: () => {
+    const t = get().latencyTimer;
+    if (t) window.clearInterval(t);
+    set({ latencyTimer: null, latencyMs: null });
+  },
+
+  joinAgoraChannel: async (userId: number) => {
+    try {
+      const { currentRoom, isMuted } = get();
+      if (!currentRoom) return;
+
+      const appId = import.meta.env.VITE_AGORA_APP_ID as string | undefined;
+      if (!appId || appId === 'YOUR_AGORA_APP_ID') {
+        console.warn('[Agora] VITE_AGORA_APP_ID not set — skipping WebRTC join.');
+        return;
+      }
+
+      const client = getAgoraClient();
+
+      // Leave if already connected
+      if ((client.connectionState as string) !== 'DISCONNECTED') {
+        await client.leave();
+      }
+
+      const channelName = String(currentRoom.id);
+      const uid = userId;
+
+      // Fetch Agora token from backend
+      let token: string | null = null;
+      try {
+        const res = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
+        if (res.ok) {
+          const data = await res.json();
+          token = data.token ?? null;
+        }
+      } catch {
+        console.warn('[Agora] Token fetch failed — joining without token (test mode).');
+      }
+
+      await client.join(appId, channelName, token || undefined, uid);
+
+      // Create and publish local microphone track
+      const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      localAudioTrack.setEnabled(!isMuted);
+      await client.publish(localAudioTrack);
+
+      // Listen for remote audio tracks
+      client.on('user-published', async (remoteUser: any, mediaType: string) => {
+        if (mediaType !== 'audio') return;
+        await client.subscribe(remoteUser, mediaType);
+        remoteUser.audioTrack?.play();
+      });
+
+      // Store reference for cleanup
+      (client as any).__localAudioTrack = localAudioTrack;
+    } catch (err) {
+      console.error('[Agora] Failed to join channel:', err);
+    }
+  },
+
+  leaveAgoraChannel: async () => {
+    try {
+      const client = getAgoraClient();
+      if ((client.connectionState as string) !== 'DISCONNECTED') {
+        const localTrack = (client as any).__localAudioTrack;
+        if (localTrack) {
+          localTrack.close();
+          delete (client as any).__localAudioTrack;
+        }
+        await client.leave();
+      }
+      set({ isSpeaking: false });
+    } catch (err) {
+      console.error('[Agora] Failed to leave channel:', err);
+    }
+  },
 }));

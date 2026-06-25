@@ -187,6 +187,10 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       handleLeaveRoom(io, socket, socket.data.currentRoom);
     }
   });
+
+  socket.on('ping', (cb) => {
+    try { cb({ ok: true, t: Date.now() }); } catch { /* noop */ }
+  });
 }
 
 function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
