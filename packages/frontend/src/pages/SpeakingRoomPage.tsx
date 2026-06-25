@@ -1,18 +1,29 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AgoraRoom } from '@/components/AgoraRoom';
 import { useRoomStore } from '@/stores/roomStore';
+import { useAuthStore } from '@/stores/authStore';
 
 export default function SpeakingRoomPage() {
-  const { currentRoom, isConnected, joiningRoomId } = useRoomStore();
+  const { roomId } = useParams();
+  const { currentRoom, isConnected, joiningRoomId, joinRoom, connectSocket } = useRoomStore();
+  const { user } = useAuthStore();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isConnected && joiningRoomId === null && currentRoom === null) {
+    if (user && roomId && !isConnected) {
+      connectSocket(user.id, user.displayName, user.personaId, user.role, roomId);
+    } else if (isConnected && !currentRoom && joiningRoomId !== roomId && roomId) {
+      joinRoom(roomId);
+    }
+  }, [user, roomId, isConnected, currentRoom, joiningRoomId, connectSocket, joinRoom]);
+
+  useEffect(() => {
+    if (!isConnected && joiningRoomId === null && currentRoom === null && !roomId) {
       const timeout = setTimeout(() => navigate('/browse'), 5000);
       return () => clearTimeout(timeout);
     }
-  }, [currentRoom, isConnected, joiningRoomId, navigate]);
+  }, [currentRoom, isConnected, joiningRoomId, navigate, roomId]);
 
   if (!currentRoom) {
     return (

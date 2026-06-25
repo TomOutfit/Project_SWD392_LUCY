@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Language, RoomState, Participant, ContentPin, Room } from '../types/index.js';
 import { RoomStageSubject, SocketNotifierObserver, DbPersistenceObserver, MaterialRecommenderObserver } from './observer.js';
 import db from '../db/index.js';
-import { levels } from '../db/schema.js';
+import { levels, rooms as roomsTable, podcasts } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
 
 // In-memory room state (production: use Redis)
@@ -147,19 +147,39 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     io.to(roomId).emit('recording-started', { roomId, recordingId });
   });
 
-  socket.on('stop-recording', ({ roomId }) => {
+  socket.on('stop-recording', async ({ roomId }) => {
     const roomData = activeRooms.get(roomId);
     if (!roomData || roomData.room.hostId !== socket.data.userId) return;
     if (!roomData.recording) return;
 
     const podcastId = uuidv4();
-    const duration = Math.floor((Date.now() - roomData.recording.startedAt.getTime()) / 1000);
+    const durationSec = Math.floor((Date.now() - roomData.recording.startedAt.getTime()) / 1000);
+    const recording = roomData.recording;
     roomData.recording = undefined;
 
     io.to(roomId).emit('recording-stopped', { roomId, podcastId });
+
+    try {
+      await db.insert(podcasts).values({
+        id: podcastId,
+        roomId,
+        roomName: roomData.room.name,
+        creatorId: recording.creatorId,
+        creatorName: roomData.room.hostName,
+        title: `${roomData.room.name} — Session Recording`,
+        durationSec,
+        fileUrl: '',
+        language: roomData.room.language,
+        levelName: roomData.room.levelName,
+        createdAt: new Date().toISOString(),
+        listenCount: 0,
+      });
+    } catch (err) {
+      console.error('[roomService] Failed to persist podcast metadata:', err);
+    }
   });
 
-  socket.on('close-room', ({ roomId }) => {
+  socket.on('close-room', async ({ roomId }) => {
     const roomData = activeRooms.get(roomId);
     if (!roomData || roomData.room.hostId !== socket.data.userId) return;
 
@@ -168,6 +188,12 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     io.to(roomId).emit('room-closed', { roomId });
     io.in(roomId).socketsLeave(roomId);
     activeRooms.delete(roomId);
+
+    try {
+      await db.update(roomsTable).set({ isLive: false }).where(eq(roomsTable.id, roomId));
+    } catch (err) {
+      console.error('[roomService] Failed to mark room as closed in DB:', err);
+    }
   });
 
   socket.on('force-stage-transition', async ({ roomId }) => {

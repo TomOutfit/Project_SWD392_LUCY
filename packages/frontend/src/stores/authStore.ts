@@ -20,16 +20,9 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
-      user: {
-        id: 1,
-        email: 'pro.host@lucy.com',
-        displayName: 'Professor LUCY',
-        personaId: 2,
-        role: 'SUPER',
-        walletBalance: 1000,
-      },
-      token: 'mock-jwt-token-by-default-to-skip-login',
-      isAuthenticated: true,
+      user: null,
+      token: null,
+      isAuthenticated: false,
       isLoading: false,
       error: null,
 
@@ -38,7 +31,6 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data } = await authApi.login({ email, password });
           localStorage.setItem('lucy_token', data.token);
-          localStorage.setItem('lucy_refresh', data.refreshToken);
           set({ user: data.user, token: data.token, isAuthenticated: true, isLoading: false });
           return true;
         } catch {
@@ -52,29 +44,18 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data } = await authApi.register({ email, password, displayName, personaId });
           localStorage.setItem('lucy_token', data.token);
-          localStorage.setItem('lucy_refresh', data.refreshToken);
           set({ user: data.user, token: data.token, isAuthenticated: true, isLoading: false });
           return true;
-        } catch {
-          set({ error: 'Email already registered', isLoading: false });
+        } catch (err: any) {
+          const msg = err?.response?.data?.error ?? 'Registration failed';
+          set({ error: msg, isLoading: false });
           return false;
         }
       },
 
       logout: () => {
-        // Reset to default mock user to skip login screens entirely
-        set({
-          user: {
-            id: 1,
-            email: 'pro.host@lucy.com',
-            displayName: 'Professor LUCY',
-            personaId: 2,
-            role: 'SUPER',
-            walletBalance: 1000,
-          },
-          token: 'mock-jwt-token-by-default-to-skip-login',
-          isAuthenticated: true,
-        });
+        localStorage.removeItem('lucy_token');
+        set({ user: null, token: null, isAuthenticated: false });
       },
 
       updateBalance: (balance) => {

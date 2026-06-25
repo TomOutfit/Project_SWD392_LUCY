@@ -17,7 +17,7 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:4173'],
+    origin: true,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -25,7 +25,7 @@ const io = new Server(httpServer, {
 
 setIO(io);
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'], credentials: true }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // Health check

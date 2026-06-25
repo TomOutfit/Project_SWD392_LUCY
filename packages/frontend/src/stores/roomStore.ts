@@ -5,14 +5,8 @@ import { io, Socket } from 'socket.io-client';
 import AgoraRTC from 'agora-rtc-sdk-ng';
 import type { Room, Participant, ContentPin } from '@/types/index';
 
-// Keep a single shared client across store instances (module singleton)
-const sharedAgoraClient: any = (globalThis as any).__lucyAgoraClient ?? null;
-if (!(globalThis as any).__lucyAgoraClient) {
-  (globalThis as any).__lucyAgoraClient = sharedAgoraClient;
-}
-
 function getAgoraClient(): any {
-  if (!sharedAgoraClient) {
+  if (!(globalThis as any).__lucyAgoraClient) {
     (globalThis as any).__lucyAgoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
   }
   return (globalThis as any).__lucyAgoraClient;
@@ -42,8 +36,11 @@ interface RoomState {
     levelName: string;
     levelId: number;
   } | null;
+  selectedMicrophoneId: string | null;
+  agoraReady: boolean;
 
   connectSocket: (userId: number, userName: string, personaId: number, role: string, pendingRoomId?: string) => void;
+
   disconnectSocket: () => void;
   joinRoom: (roomId: string) => void;
   leaveRoom: () => void;
@@ -60,8 +57,12 @@ interface RoomState {
   forceStageTransition: () => void;
   startLatencyProbe: () => void;
   stopLatencyProbe: () => void;
+  setSelectedMicrophone: (id: string) => void;
+  switchMicrophone: (id: string) => Promise<void>;
   joinAgoraChannel: (userId: number) => Promise<void>;
   leaveAgoraChannel: () => Promise<void>;
+  getLocalVolumeLevel: () => number;
+  getLocalMediaStreamTrack: () => MediaStreamTrack | null;
 }
 
 export const useRoomStore = create<RoomState>((set, get) => ({
@@ -81,6 +82,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   latencyTimer: null,
   giftEvents: [],
   recommendation: null,
+  selectedMicrophoneId: null,
+  agoraReady: false,
 
   connectSocket: (userId, userName, personaId, role, pendingRoomId) => {
     const existingSocket = get().socket;
@@ -107,7 +110,10 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       const existing = get().latencyTimer;
       if (existing) window.clearInterval(existing);
       const timer = window.setInterval(() => {
-        try { socket.emit('ping', ({ t }: { t: number }) => set({ latencyMs: Date.now() - t })); } catch { /* noop */ }
+        try {
+          const start = Date.now();
+          socket.emit('ping', () => set({ latencyMs: Date.now() - start }));
+        } catch { /* noop */ }
       }, 2000);
       set({ latencyTimer: timer, latencyMs: null });
     });
@@ -138,12 +144,24 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
 
     socket.on('speak-granted', ({ oderId }: { oderId: number }) => {
+      if (oderId === (socket.auth as any)?.userId) {
+        try {
+          const track = (getAgoraClient() as any).__localAudioTrack;
+          if (track) track.setEnabled(true);
+        } catch {}
+      }
       set((s) => ({
         participants: s.participants.map((p) => p.oderId === oderId ? { ...p, isMuted: false, isSpeaking: true } : p),
       }));
     });
 
     socket.on('speak-revoked', ({ oderId }: { oderId: number }) => {
+      if (oderId === (socket.auth as any)?.userId) {
+        try {
+          const track = (getAgoraClient() as any).__localAudioTrack;
+          if (track) track.setEnabled(false);
+        } catch {}
+      }
       set((s) => ({
         participants: s.participants.map((p) => p.oderId === oderId ? { ...p, isMuted: true, isSpeaking: false } : p),
       }));
@@ -186,11 +204,6 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     socket.on('error', ({ message }: { message: string }) => {
       console.error('[Socket error]', message);
-    });
-
-    socket.on('pong', (response: { t: number }) => {
-      const rtt = Date.now() - response.t;
-      set({ latencyMs: rtt });
     });
   },
 
@@ -259,8 +272,13 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   toggleMute: () => {
     const { socket, currentRoom, isMuted } = get();
     if (socket && currentRoom) {
-      socket.emit('toggle-mute', { roomId: currentRoom.id, muted: !isMuted });
-      set({ isMuted: !isMuted });
+      const newMutedState = !isMuted;
+      socket.emit('toggle-mute', { roomId: currentRoom.id, muted: newMutedState });
+      set({ isMuted: newMutedState });
+      try {
+        const track = (getAgoraClient() as any).__localAudioTrack;
+        if (track) track.setEnabled(!newMutedState);
+      } catch {}
     }
   },
 
@@ -306,10 +324,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const s = get().socket;
     if (!s?.connected) return;
     const timer = window.setInterval(() => {
-      try { s.emit('ping', ({ t }: { t: number }) => {
-        const rtt = Date.now() - t;
-        set({ latencyMs: rtt });
-      }); } catch { /* noop */ }
+      try {
+        const start = Date.now();
+        s.emit('ping', () => {
+          set({ latencyMs: Date.now() - start });
+        });
+      } catch { /* noop */ }
     }, 2000);
     set({ latencyTimer: timer, latencyMs: null });
   },
@@ -318,6 +338,44 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const t = get().latencyTimer;
     if (t) window.clearInterval(t);
     set({ latencyTimer: null, latencyMs: null });
+  },
+
+  setSelectedMicrophone: (id: string) => set({ selectedMicrophoneId: id }),
+
+  switchMicrophone: async (id: string) => {
+    set({ selectedMicrophoneId: id });
+    try {
+      const track = (getAgoraClient() as any).__localAudioTrack;
+      if (track) {
+        await track.setDevice(id);
+      }
+    } catch (err) {
+      console.error('[Agora] Failed to switch device:', err);
+    }
+  },
+
+  getLocalVolumeLevel: () => {
+    try {
+      const client = getAgoraClient();
+      const track = (client as any).__localAudioTrack;
+      if (track) return track.getVolumeLevel() * 100;
+    } catch {
+      // noop
+    }
+    return 0;
+  },
+
+  getLocalMediaStreamTrack: () => {
+    try {
+      const client = getAgoraClient();
+      const track = (client as any).__localAudioTrack;
+      if (track && typeof track.getMediaStreamTrack === 'function') {
+        return track.getMediaStreamTrack();
+      }
+    } catch {
+      // noop
+    }
+    return null;
   },
 
   joinAgoraChannel: async (userId: number) => {
@@ -355,8 +413,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
       await client.join(appId, channelName, token || undefined, uid);
 
+      const { selectedMicrophoneId } = get();
+
       // Create and publish local microphone track
-      const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack(
+        selectedMicrophoneId ? { microphoneId: selectedMicrophoneId } : undefined
+      );
       localAudioTrack.setEnabled(!isMuted);
       await client.publish(localAudioTrack);
 
@@ -369,12 +431,14 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
       // Store reference for cleanup
       (client as any).__localAudioTrack = localAudioTrack;
+      set({ agoraReady: true });
     } catch (err) {
       console.error('[Agora] Failed to join channel:', err);
     }
   },
 
   leaveAgoraChannel: async () => {
+    set({ agoraReady: false });
     try {
       const client = getAgoraClient();
       if ((client.connectionState as string) !== 'DISCONNECTED') {

@@ -110,7 +110,7 @@ export default function BrowseRoomsPage() {
                 <RoomCard room={room} onJoin={(r) => {
                   if (user) {
                     joinRoom(r.id);
-                    navigate('/speaking');
+                    navigate(`/speaking/${r.id}`);
                   }
                 }} />
               </motion.div>

@@ -1,8 +1,8 @@
 // src/pages/CreateRoomPage.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mic2, Globe, BookOpen } from 'lucide-react';
+import { Mic2, Globe, BookOpen, Settings2 } from 'lucide-react';
 import { levelsApi, roomsApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { useRoomStore } from '@/stores/roomStore';
@@ -12,16 +12,82 @@ import { LANG_FLAGS, LANG_NAMES, STAGE_NAMES } from '@/types/index';
 
 export default function CreateRoomPage() {
   const { user } = useAuthStore();
-  const { connectSocket, joinRoom } = useRoomStore();
+  const { connectSocket, joinRoom, selectedMicrophoneId, setSelectedMicrophone } = useRoomStore();
   const navigate = useNavigate();
   const [levels, setLevels] = useState<Level[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([]);
   const [form, setForm] = useState({
     name: '',
     language: 'EN' as Language,
     levelId: 1,
   });
+
+  useEffect(() => {
+    const getDevices = async () => {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(t => t.stop()));
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === 'audioinput');
+        setMicrophones(audioInputs);
+        if (audioInputs.length > 0 && !useRoomStore.getState().selectedMicrophoneId) {
+          useRoomStore.getState().setSelectedMicrophone(audioInputs[0].deviceId);
+        }
+      } catch (err) {
+        console.error('Error fetching devices', err);
+      }
+    };
+    getDevices();
+  }, []);
+
+  const volumeBarRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    let audioContext: AudioContext;
+    let analyzer: AnalyserNode;
+    let microphone: MediaStreamAudioSourceNode;
+    let raf: number;
+    let activeStream: MediaStream;
+
+    const startAudio = async () => {
+      try {
+        activeStream = await navigator.mediaDevices.getUserMedia({
+          audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
+        });
+        audioContext = new window.AudioContext();
+        analyzer = audioContext.createAnalyser();
+        microphone = audioContext.createMediaStreamSource(activeStream);
+        microphone.connect(analyzer);
+        analyzer.fftSize = 256;
+        const bufferLength = analyzer.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const updateVol = () => {
+          analyzer.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+          }
+          const vol = sum / bufferLength; // 0 to 255
+          if (volumeBarRef.current) {
+            volumeBarRef.current.style.width = `${Math.min(100, (vol / 60) * 100)}%`;
+          }
+          raf = requestAnimationFrame(updateVol);
+        };
+        updateVol();
+      } catch (err) {
+        // user denied or no mic
+      }
+    };
+    startAudio();
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (audioContext && audioContext.state !== 'closed') audioContext.close();
+      if (activeStream) activeStream.getTracks().forEach(t => t.stop());
+    };
+  }, [selectedMicrophoneId]);
 
   useEffect(() => {
     if (!user || user.role === 'LUCY') {
@@ -53,7 +119,7 @@ export default function CreateRoomPage() {
         levelName: selectedLevel?.name || `Level ${form.levelId}`,
       });
       joinRoom(data.id);
-      navigate('/speaking');
+      navigate(`/speaking/${data.id}`);
     } catch {
       alert('Failed to create room');
     }
@@ -133,6 +199,37 @@ export default function CreateRoomPage() {
               <p className="text-xs text-mist mt-1">Stage {selectedLevel.stage} • Sub-level {selectedLevel.subLevel}</p>
             </div>
           )}
+
+          {/* Microphone Selection */}
+          <div>
+            <label className="text-sm font-exo font-medium text-mist mb-2 flex items-center gap-1.5">
+              <Settings2 className="w-4 h-4" /> Microphone
+            </label>
+            
+            <div className="flex items-center gap-3 mb-3 px-2">
+              <Mic2 className="w-5 h-5 text-mist" />
+              <div className="flex-1 h-3 bg-midnight rounded-full overflow-hidden border border-ghost">
+                <div 
+                  ref={volumeBarRef}
+                  className="h-full bg-[#1A73E8] rounded-full transition-all duration-75"
+                  style={{ width: '0%' }}
+                />
+              </div>
+            </div>
+
+            <select
+              className="w-full bg-midnight border border-ghost rounded-xl px-4 py-3 text-sm text-[#F0F4FF] outline-none focus:border-cyan transition-all"
+              value={selectedMicrophoneId || ''}
+              onChange={(e) => setSelectedMicrophone(e.target.value)}
+            >
+              {microphones.length === 0 && <option value="">Default Microphone</option>}
+              {microphones.map((mic, idx) => (
+                <option key={mic.deviceId || `mic-${idx}`} value={mic.deviceId}>
+                  {mic.label || `Microphone ${idx + 1}`}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <Button className="w-full" onClick={handleCreate} loading={creating} disabled={!form.name.trim()}>
             <Mic2 className="w-4 h-4" /> Go Live Now

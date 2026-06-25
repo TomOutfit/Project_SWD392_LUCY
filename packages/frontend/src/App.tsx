@@ -15,20 +15,9 @@ import DashboardPage from '@/pages/DashboardPage';
 import SpeakingRoomPage from '@/pages/SpeakingRoomPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuthStore();
-  if (!isAuthenticated || !user) {
-    useAuthStore.setState({
-      user: {
-        id: 1,
-        email: 'pro.host@lucy.com',
-        displayName: 'Professor LUCY',
-        personaId: 2,
-        role: 'SUPER',
-        walletBalance: 1000,
-      },
-      token: 'mock-jwt-token-by-default-to-skip-login',
-      isAuthenticated: true,
-    });
+  const { isAuthenticated } = useAuthStore();
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
   return <>{children}</>;
 }
@@ -72,7 +61,8 @@ export default function App() {
           <Route path="/create-room" element={
             <ProtectedRoute><CreateRoomPage /></ProtectedRoute>
           } />
-          <Route path="/speaking" element={
+          <Route path="/speaking" element={<Navigate to="/browse" replace />} />
+          <Route path="/speaking/:roomId" element={
             <ProtectedRoute><SpeakingRoomPage /></ProtectedRoute>
           } />
           <Route path="/leaderboard" element={

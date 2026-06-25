@@ -31,3 +31,6 @@ obj/
 .env
 .env.local
 .secret
+!.env.example
+
+friction-log.md

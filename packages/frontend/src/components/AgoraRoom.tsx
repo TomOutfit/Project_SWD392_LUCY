@@ -17,7 +17,7 @@ export function AgoraRoom() {
     pinnedContent, isRecording, giftEvents, leaveRoom,
     handRaise, handLower, toggleMute, grantSpeak, revokeSpeak,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
-    latencyMs,
+    latencyMs, selectedMicrophoneId, switchMicrophone
   } = useRoomStore();
 
   const { user, updateBalance } = useAuthStore();
@@ -25,47 +25,72 @@ export function AgoraRoom() {
   const [showPinModal, setShowPinModal] = useState(false);
   const [selectedGift, setSelectedGift] = useState<typeof GIFT_TYPES[0] | null>(null);
   const [pinForm, setPinForm] = useState({ title: '', url: '', type: 'vocabulary' as 'vocabulary' | 'grammar' | 'conversation' | 'pdf' });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const volumeBarRef = useRef<HTMLDivElement>(null);
+  const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    let offset = 0;
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      setMicrophones(devices.filter(d => d.kind === 'audioinput'));
+    }).catch(() => {});
+  }, []);
 
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const bars = 8;
-      const barW = canvas.width / bars - 4;
-      for (let i = 0; i < bars; i++) {
-        const h = isSpeaking && !isMuted
-          ? Math.abs(Math.sin((offset + i * 0.7) * Math.PI)) * canvas.height * 0.8 + 10
-          : isMuted ? 8 : 30;
-        const gradient = ctx.createLinearGradient(0, canvas.height - h, 0, canvas.height);
-        gradient.addColorStop(0, '#00F5FF');
-        gradient.addColorStop(1, '#7B2FFF');
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.roundRect(i * (barW + 4), canvas.height - h, barW, h, 3);
-        ctx.fill();
-      }
-      offset += 0.1;
-      animationRef.current = requestAnimationFrame(draw);
+  useEffect(() => {
+    let audioContext: AudioContext;
+    let analyzer: AnalyserNode;
+    let microphone: MediaStreamAudioSourceNode;
+    let raf: number;
+    let activeStream: MediaStream;
+
+    const startAudio = async () => {
+      try {
+        activeStream = await navigator.mediaDevices.getUserMedia({
+          audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
+        });
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        audioContext = new AudioCtx();
+        analyzer = audioContext.createAnalyser();
+        microphone = audioContext.createMediaStreamSource(activeStream);
+        microphone.connect(analyzer);
+        analyzer.fftSize = 256;
+        const bufferLength = analyzer.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const updateVol = () => {
+          analyzer.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+          }
+          const vol = sum / bufferLength;
+          if (volumeBarRef.current) {
+            const widthPercent = isMuted ? 0 : Math.min(100, (vol / 60) * 100);
+            volumeBarRef.current.style.width = `${widthPercent}%`;
+          }
+          raf = requestAnimationFrame(updateVol);
+        };
+        updateVol();
+      } catch (err) {}
     };
 
-    draw();
-    return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
-  }, [isSpeaking, isMuted]);
+    startAudio();
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (audioContext && audioContext.state !== 'closed') audioContext.close();
+      if (activeStream) activeStream.getTracks().forEach(t => t.stop());
+    };
+  }, [isMuted, selectedMicrophoneId]);
 
   useEffect(() => {
     if (currentRoom && user) {
-      const { joinRoom: doJoin, joiningRoomId } = useRoomStore.getState();
+      const { joinRoom: doJoin, joiningRoomId, joinAgoraChannel } = useRoomStore.getState();
       if (joiningRoomId !== currentRoom.id) {
         doJoin(currentRoom.id);
       }
+      // Initialize Agora connection and local audio track
+      joinAgoraChannel(user.id);
     }
-  }, [currentRoom?.id]);
+  }, [currentRoom?.id, user?.id]);
 
   if (!currentRoom || !user) return null;
 
@@ -158,11 +183,17 @@ export function AgoraRoom() {
         {/* Main area */}
         <div className="flex-1 flex flex-col">
           <div className="p-4 border-b border-ghost">
-            <div className="flex items-center gap-3 mb-2">
-              <canvas ref={canvasRef} width={200} height={40} className="rounded" />
-              <div>
-                <p className="text-xs text-mist">Audio Level</p>
-                <p className="text-xs font-mono text-cyan">
+            <div className="flex items-center gap-3 mb-4 px-2">
+              <Mic className={`w-5 h-5 ${isMuted ? 'text-rose-500' : 'text-mist'}`} />
+              <div className="flex-1 h-3 bg-midnight rounded-full overflow-hidden border border-ghost">
+                <div 
+                  ref={volumeBarRef}
+                  className={`h-full rounded-full transition-all duration-75 ${isMuted ? 'bg-rose-500/50' : 'bg-blue-500'}`}
+                  style={{ width: '0%' }}
+                />
+              </div>
+              <div className="w-20 text-right">
+                <p className="text-[10px] font-mono text-mist uppercase tracking-wider">
                   {isMuted ? 'MUTED' : isSpeaking ? 'SPEAKING' : 'READY'}
                 </p>
               </div>
@@ -352,6 +383,23 @@ export function AgoraRoom() {
                 </Button>
               </>
             )}
+
+            {/* Microphone Switcher in Room */}
+            <div className="mt-4 pt-4 border-t border-ghost">
+              <label className="text-[10px] font-bold text-mist uppercase tracking-wider mb-1.5 block">Microphone</label>
+              <select
+                className="w-full bg-navy border border-ghost rounded-lg px-2 py-1.5 text-xs text-[#F0F4FF] outline-none focus:border-cyan transition-all"
+                value={selectedMicrophoneId || ''}
+                onChange={(e) => switchMicrophone(e.target.value)}
+              >
+                {microphones.length === 0 && <option value="">Default</option>}
+                {microphones.map(mic => (
+                  <option key={mic.deviceId} value={mic.deviceId}>
+                    {mic.label || `Mic (${mic.deviceId.slice(0, 4)})`}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </div>

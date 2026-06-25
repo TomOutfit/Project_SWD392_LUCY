@@ -9,4 +9,12 @@ export default defineConfig({
       "@": resolve(__dirname, "src"),
     },
   },
+  server: {
+    proxy: {
+      "/api/auth": "http://localhost:5001",
+      "/api/users": "http://localhost:5001",
+      "/api/wallet": "http://localhost:5001",
+      "/api/gifts": "http://localhost:5001",
+    },
+  },
 });
