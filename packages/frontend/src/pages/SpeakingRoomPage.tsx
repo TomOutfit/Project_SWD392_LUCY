@@ -25,6 +25,13 @@ export default function SpeakingRoomPage() {
     }
   }, [currentRoom, isConnected, joiningRoomId, navigate, roomId]);
 
+  // Cleanup when navigating away from the page
+  useEffect(() => {
+    return () => {
+      useRoomStore.getState().leaveRoom();
+    };
+  }, []);
+
   if (!currentRoom) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4 text-center text-mist">

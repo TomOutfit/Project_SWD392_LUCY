@@ -1,6 +1,6 @@
 // src/pages/BrowseRoomsPage.tsx
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, RefreshCw } from 'lucide-react';
 import { roomsApi } from '@/lib/api';
@@ -8,7 +8,6 @@ import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
 import { RoomCard } from '@/components/RoomCard';
 import { RoomCardSkeleton } from '@/components/ui/Skeleton';
-import { AgoraRoom } from '@/components/AgoraRoom';
 import type { Room, Language } from '@/types/index';
 import { LANG_FLAGS, LANG_NAMES } from '@/types/index';
 
@@ -49,7 +48,7 @@ export default function BrowseRoomsPage() {
     r.levelName.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (currentRoom) return <AgoraRoom />;
+  if (currentRoom) return <Navigate to={`/speaking/${currentRoom.id}`} replace />;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">

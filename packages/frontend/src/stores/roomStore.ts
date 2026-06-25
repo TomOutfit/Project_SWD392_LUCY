@@ -107,20 +107,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         set({ joiningRoomId: null });
         socket.emit('join-room', { roomId: roomToJoin, user: socket.auth });
       }
-      const existing = get().latencyTimer;
-      if (existing) window.clearInterval(existing);
-      const timer = window.setInterval(() => {
-        try {
-          const start = Date.now();
-          socket.emit('ping', () => set({ latencyMs: Date.now() - start }));
-        } catch { /* noop */ }
-      }, 2000);
-      set({ latencyTimer: timer, latencyMs: null });
+      // We no longer use socket ping for latency. We will use Agora's getRTCStats().RTT for true audio latency.
+      set({ isConnected: true });
     });
     socket.on('disconnect', () => {
-      const existing = get().latencyTimer;
-      if (existing) window.clearInterval(existing);
-      set({ isConnected: false, latencyTimer: null, latencyMs: null });
+      set({ isConnected: false, latencyMs: null });
     });
 
     socket.on('room-joined', ({ room }: { room: Room }) => {
@@ -431,7 +422,19 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
       // Store reference for cleanup
       (client as any).__localAudioTrack = localAudioTrack;
-      set({ agoraReady: true });
+      
+      // Start True Audio Latency Probe
+      const timer = window.setInterval(() => {
+        try {
+          if (client.connectionState === 'CONNECTED') {
+            const stats = client.getRTCStats();
+            if (stats && typeof stats.RTT === 'number') {
+              set({ latencyMs: stats.RTT });
+            }
+          }
+        } catch {}
+      }, 2000);
+      set({ agoraReady: true, latencyTimer: timer as any });
     } catch (err) {
       console.error('[Agora] Failed to join channel:', err);
     }
@@ -439,6 +442,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   leaveAgoraChannel: async () => {
     set({ agoraReady: false });
+    const { latencyTimer } = get();
+    if (latencyTimer) {
+      window.clearInterval(latencyTimer);
+      set({ latencyTimer: null, latencyMs: null });
+    }
     try {
       const client = getAgoraClient();
       if ((client.connectionState as string) !== 'DISCONNECTED') {

@@ -17,7 +17,7 @@ export function AgoraRoom() {
     pinnedContent, isRecording, giftEvents, leaveRoom,
     handRaise, handLower, toggleMute, grantSpeak, revokeSpeak,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
-    latencyMs, selectedMicrophoneId, switchMicrophone
+    latencyMs, selectedMicrophoneId, switchMicrophone, agoraReady
   } = useRoomStore();
 
   const { user, updateBalance } = useAuthStore();
@@ -39,17 +39,18 @@ export function AgoraRoom() {
     let analyzer: AnalyserNode;
     let microphone: MediaStreamAudioSourceNode;
     let raf: number;
-    let activeStream: MediaStream;
 
-    const startAudio = async () => {
+    const startAudio = () => {
+      if (!agoraReady) return;
+      const track = useRoomStore.getState().getLocalMediaStreamTrack();
+      if (!track) return;
+      
       try {
-        activeStream = await navigator.mediaDevices.getUserMedia({
-          audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
-        });
+        const stream = new MediaStream([track]);
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         audioContext = new AudioCtx();
         analyzer = audioContext.createAnalyser();
-        microphone = audioContext.createMediaStreamSource(activeStream);
+        microphone = audioContext.createMediaStreamSource(stream);
         microphone.connect(analyzer);
         analyzer.fftSize = 256;
         const bufferLength = analyzer.frequencyBinCount;
@@ -77,9 +78,8 @@ export function AgoraRoom() {
     return () => {
       if (raf) cancelAnimationFrame(raf);
       if (audioContext && audioContext.state !== 'closed') audioContext.close();
-      if (activeStream) activeStream.getTracks().forEach(t => t.stop());
     };
-  }, [isMuted, selectedMicrophoneId]);
+  }, [isMuted, selectedMicrophoneId, agoraReady]);
 
   useEffect(() => {
     if (currentRoom && user) {
