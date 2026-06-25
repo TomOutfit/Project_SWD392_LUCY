@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2A2A4A #12122A;
+  }
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track { background: #12122A; }
+  *::-webkit-scrollbar-thumb { background: #2A2A4A; border-radius: 3px; }
+  *::-webkit-scrollbar-thumb:hover { background: #7B2FFF; }
+
+  body {
+    background-color: #0B0B1A;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(123, 47, 255, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(0, 245, 255, 0.06) 0%, transparent 50%),
+      linear-gradient(180deg, #0B0B1A 0%, #080815 100%);
+    min-height: 100vh;
+  }
+
+  ::selection { background: rgba(0, 245, 255, 0.3); color: #F0F4FF; }
+}
+
+@layer components {
+  .skeleton {
+    background: linear-gradient(90deg, #1A1A35 25%, #22223A 50%, #1A1A35 75%);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  .glass {
+    background: rgba(26, 26, 53, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(42, 42, 74, 0.8);
+  }
+
+  .glow-cyan { box-shadow: 0 0 20px rgba(0, 245, 255, 0.15); }
+  .glow-violet { box-shadow: 0 0 20px rgba(123, 47, 255, 0.15); }
+  .glow-magenta { box-shadow: 0 0 20px rgba(255, 45, 107, 0.15); }
+
+  .btn-primary {
+    @apply px-6 py-2.5 bg-cyan text-void font-exo font-semibold rounded-lg
+           transition-all duration-200 hover:shadow-cyanHover hover:scale-[1.03]
+           active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply px-6 py-2.5 bg-violet text-white font-exo font-semibold rounded-lg
+           transition-all duration-200 hover:shadow-violet hover:scale-[1.03]
+           active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-magenta {
+    @apply px-6 py-2.5 bg-magenta text-white font-exo font-semibold rounded-lg
+           transition-all duration-200 hover:shadow-magenta hover:scale-[1.03]
+           active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply px-6 py-2.5 bg-transparent border border-ghost text-mist font-exo
+           font-semibold rounded-lg transition-all duration-200
+           hover:border-cyan hover:text-cyan hover:scale-[1.02]
+           active:scale-[0.97];
+  }
+
+  .card {
+    @apply bg-midnight border border-ghost rounded-xl p-5
+           transition-all duration-200 hover:border-violet/40 hover:shadow-card;
+  }
+  .input-field {
+    @apply w-full px-4 py-3 bg-navy border border-ghost rounded-lg text-[#F0F4FF]
+           font-inter placeholder:text-mist/50 outline-none transition-all duration-200
+           focus:border-cyan focus:shadow-[0_0_0_3px_rgba(0,245,255,0.1)];
+  }
+}

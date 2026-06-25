@@ -1,0 +1,33 @@
+# Node
+node_modules/
+packages/**/node_modules/
+dist/
+build/
+
+# Vite / Frontend
+packages/frontend/dist/
+packages/frontend/.env
+
+# TypeScript
+*.tsbuildinfo
+
+# .NET
+bin/
+obj/
+*.user
+*.vs/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.local
+.secret
