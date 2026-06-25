@@ -50,7 +50,7 @@ export default function CreateRoomPage() {
         levelName: selectedLevel?.name || `Level ${form.levelId}`,
       });
       joinRoom(data.id);
-      navigate('/browse');
+      navigate('/speaking');
     } catch {
       alert('Failed to create room');
     }

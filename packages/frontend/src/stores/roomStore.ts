@@ -15,6 +15,7 @@ interface RoomState {
   pinnedContent: ContentPin | null;
   isRecording: boolean;
   recordingId: string | null;
+  pendingRoomId: string | null;
   giftEvents: Array<{ id: string; senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string }>;
   recommendation: {
     vocabulary: string[];
@@ -25,7 +26,7 @@ interface RoomState {
     levelId: number;
   } | null;
 
-  connectSocket: (userId: number, userName: string, personaId: number, role: string) => void;
+  connectSocket: (userId: number, userName: string, personaId: number, role: string, pendingRoomId?: string) => void;
   disconnectSocket: () => void;
   joinRoom: (roomId: string) => void;
   leaveRoom: () => void;
@@ -54,19 +55,28 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   pinnedContent: null,
   isRecording: false,
   recordingId: null,
+  pendingRoomId: null,
   giftEvents: [],
   recommendation: null,
 
-  connectSocket: (userId, userName, personaId, role) => {
+  connectSocket: (userId, userName, personaId, role, pendingRoomId) => {
     const existingSocket = get().socket;
     if (existingSocket?.connected) return;
+    if (pendingRoomId) set({ pendingRoomId });
 
     const socket = io('http://localhost:3001', {
       auth: { userId, userName, personaId, role },
       transports: ['websocket'],
     });
 
-    socket.on('connect', () => set({ socket, isConnected: true }));
+    socket.on('connect', () => {
+      set({ socket, isConnected: true });
+      const roomToJoin = pendingRoomId || get().pendingRoomId;
+      if (roomToJoin) {
+        socket.emit('join-room', { roomId: roomToJoin, user: socket.auth });
+        set({ pendingRoomId: null });
+      }
+    });
     socket.on('disconnect', () => set({ isConnected: false }));
 
     socket.on('room-joined', ({ room }: { room: Room }) => {

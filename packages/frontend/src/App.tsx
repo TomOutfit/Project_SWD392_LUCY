@@ -12,6 +12,7 @@ import LeaderboardPage from '@/pages/LeaderboardPage';
 import ProfilePage from '@/pages/ProfilePage';
 import PodcastsPage from '@/pages/PodcastsPage';
 import DashboardPage from '@/pages/DashboardPage';
+import SpeakingRoomPage from '@/pages/SpeakingRoomPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -70,6 +71,9 @@ export default function App() {
           } />
           <Route path="/create-room" element={
             <ProtectedRoute><CreateRoomPage /></ProtectedRoute>
+          } />
+          <Route path="/speaking" element={
+            <ProtectedRoute><SpeakingRoomPage /></ProtectedRoute>
           } />
           <Route path="/leaderboard" element={
             <ProtectedRoute><LeaderboardPage /></ProtectedRoute>

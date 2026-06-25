@@ -1,5 +1,6 @@
 // src/pages/BrowseRoomsPage.tsx
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, RefreshCw } from 'lucide-react';
 import { roomsApi } from '@/lib/api';
@@ -16,6 +17,7 @@ export default function BrowseRoomsPage() {
   const [loading, setLoading] = useState(true);
   const [langFilter, setLangFilter] = useState<Language | 'ALL'>('ALL');
   const [search, setSearch] = useState('');
+  const navigate = useNavigate();
   const { connectSocket, joinRoom, currentRoom } = useRoomStore();
   const { user } = useAuthStore();
 
@@ -106,7 +108,10 @@ export default function BrowseRoomsPage() {
             {filtered.map((room, i) => (
               <motion.div key={room.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
                 <RoomCard room={room} onJoin={(r) => {
-                  if (user) joinRoom(r.id);
+                  if (user) {
+                    joinRoom(r.id);
+                    navigate('/speaking');
+                  }
                 }} />
               </motion.div>
             ))}
