@@ -112,7 +112,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     }
     if (pendingRoomId) set({ joiningRoomId: pendingRoomId });
 
-    const socket = io('http://localhost:3001', {
+    const njsUrl = import.meta.env.VITE_NJS_URL || 'http://localhost:3001';
+    const socket = io(njsUrl, {
       auth: { userId, userName, personaId, role },
       transports: ['websocket'],
     });
@@ -225,7 +226,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
           formData.append('audio', blob, `podcast-${podcastId}.webm`);
 
           try {
-            const res = await fetch(`http://localhost:3001/api/podcasts/${podcastId}/upload`, {
+            const njsUrl = import.meta.env.VITE_NJS_URL || 'http://localhost:3001';
+            const res = await fetch(`${njsUrl}/api/podcasts/${podcastId}/upload`, {
               method: 'POST',
               body: formData,
             });

@@ -1,7 +1,7 @@
 // src/lib/api.ts
 import axios from 'axios';
 
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -54,7 +54,7 @@ export const walletApi = {
 
 // Levels
 export const njsApi = axios.create({
-  baseURL: 'http://localhost:3001',
+  baseURL: import.meta.env.VITE_NJS_URL || 'http://localhost:3001',
   headers: { 'Content-Type': 'application/json' },
 });
 
