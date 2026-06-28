@@ -15,6 +15,10 @@ export default defineConfig({
       "/api/users": "http://localhost:5001",
       "/api/wallet": "http://localhost:5001",
       "/api/gifts": "http://localhost:5001",
+      "/api/agora": "http://localhost:3001",
+      "/api/levels": "http://localhost:3001",
+      "/api/rooms": "http://localhost:3001",
+      "/api/podcasts": "http://localhost:3001",
     },
   },
 });

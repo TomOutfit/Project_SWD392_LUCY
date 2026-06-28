@@ -6,10 +6,11 @@ import { useAuthStore } from '@/stores/authStore';
 
 export default function SpeakingRoomPage() {
   const { roomId } = useParams();
-  const { currentRoom, isConnected, joiningRoomId, joinRoom, connectSocket } = useRoomStore();
+  const { currentRoom, isConnected, joiningRoomId, joinRoom, connectSocket, joinAgoraChannel, agoraJoined, agoraJoining } = useRoomStore();
   const { user } = useAuthStore();
   const navigate = useNavigate();
 
+  // Connect socket + join room
   useEffect(() => {
     if (user && roomId && !isConnected) {
       connectSocket(user.id, user.displayName, user.personaId, user.role, roomId);
@@ -18,6 +19,14 @@ export default function SpeakingRoomPage() {
     }
   }, [user, roomId, isConnected, currentRoom, joiningRoomId, connectSocket, joinRoom]);
 
+  // Join Agora channel only after socket is connected
+  useEffect(() => {
+    if (user && roomId && isConnected && !agoraJoined && !agoraJoining) {
+      console.log('[SpeakingRoom] Joining Agora channel...');
+      joinAgoraChannel(user.id, roomId);
+    }
+  }, [user?.id, roomId, isConnected, agoraJoined, agoraJoining, joinAgoraChannel]);
+
   useEffect(() => {
     if (!isConnected && joiningRoomId === null && currentRoom === null && !roomId) {
       const timeout = setTimeout(() => navigate('/browse'), 5000);
@@ -25,7 +34,6 @@ export default function SpeakingRoomPage() {
     }
   }, [currentRoom, isConnected, joiningRoomId, navigate, roomId]);
 
-  // Cleanup when navigating away from the page
   useEffect(() => {
     return () => {
       useRoomStore.getState().leaveRoom();

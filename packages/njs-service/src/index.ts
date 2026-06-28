@@ -9,8 +9,12 @@ import { getRooms, getPodcasts, getAgoraToken } from './controllers/roomControll
 import { registerSocketHandlers, createRoomInMemory, getActiveRooms, setIO, forceNextSublevel } from './services/roomService.js';
 import { RoomState } from './types/index.js';
 import db from './db/index.js';
-import { rooms } from './db/schema.js';
+import { rooms, podcasts } from './db/schema.js';
+import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const httpServer = createServer(app);
@@ -27,6 +31,9 @@ setIO(io);
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+// Serve uploads directory
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', service: 'LUCY Node.js Service', timestamp: new Date().toISOString() }));
@@ -49,6 +56,30 @@ app.post('/api/rooms/:id/next-stage', async (req, res) => {
 
 // Podcast routes
 app.get('/api/podcasts', getPodcasts);
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(process.cwd(), 'uploads', 'podcasts');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${req.params.id}-${Date.now()}.webm`);
+  }
+});
+const upload = multer({ storage });
+
+app.post('/api/podcasts/:id/upload', upload.single('audio'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+  const fileUrl = `/uploads/podcasts/${req.file.filename}`;
+  try {
+    await db.update(podcasts).set({ fileUrl }).where(eq(podcasts.id, req.params.id));
+    res.json({ success: true, fileUrl });
+  } catch (err) {
+    console.error('Failed to update podcast fileUrl:', err);
+    res.status(500).json({ error: 'Database update failed' });
+  }
+});
 
 // Agora token (stub)
 app.get('/api/agora/token', getAgoraToken);
@@ -120,7 +151,12 @@ app.post('/api/rooms', async (req: Request, res: Response) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
+  // Clear ghost rooms from previous dev sessions
+  try {
+    await db.update(rooms).set({ isLive: false });
+  } catch (e) {}
+
   console.log(`\n🎙️  LUCY Node.js Service running on http://localhost:${PORT}`);
   console.log(`📡 Socket.io ready for real-time connections`);
   console.log(`📚 100 levels seeded in SQLite database\n`);

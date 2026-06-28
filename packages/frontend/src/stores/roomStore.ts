@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 import AgoraRTC from 'agora-rtc-sdk-ng';
 import type { Room, Participant, ContentPin } from '@/types/index';
+import toast from 'react-hot-toast';
 
 function getAgoraClient(): any {
   if (!(globalThis as any).__lucyAgoraClient) {
@@ -11,6 +12,14 @@ function getAgoraClient(): any {
   }
   return (globalThis as any).__lucyAgoraClient;
 }
+
+interface LucyMixer {
+  context: AudioContext | null;
+  dest: MediaStreamAudioDestinationNode | null;
+  recorder: MediaRecorder | null;
+  chunks: BlobPart[];
+}
+(globalThis as any).__lucyMixer = { context: null, dest: null, recorder: null, chunks: [] } as LucyMixer;
 
 interface RoomState {
   socket: Socket | null;
@@ -27,6 +36,8 @@ interface RoomState {
   joiningRoomId: string | null;
   latencyMs: number | null;
   latencyTimer: number | null;
+  agoraJoining: boolean;
+  agoraJoined: boolean;
   giftEvents: Array<{ id: string; senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string }>;
   recommendation: {
     vocabulary: string[];
@@ -59,7 +70,7 @@ interface RoomState {
   stopLatencyProbe: () => void;
   setSelectedMicrophone: (id: string) => void;
   switchMicrophone: (id: string) => Promise<void>;
-  joinAgoraChannel: (userId: number) => Promise<void>;
+  joinAgoraChannel: (userId: number, roomId: string) => Promise<void>;
   leaveAgoraChannel: () => Promise<void>;
   getLocalVolumeLevel: () => number;
   getLocalMediaStreamTrack: () => MediaStreamTrack | null;
@@ -80,6 +91,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   joiningRoomId: null,
   latencyMs: null,
   latencyTimer: null,
+  agoraJoining: false,
+  agoraJoined: false,
   giftEvents: [],
   recommendation: null,
   selectedMicrophoneId: null,
@@ -135,25 +148,35 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
 
     socket.on('speak-granted', ({ oderId }: { oderId: number }) => {
-      if (oderId === (socket.auth as any)?.userId) {
+      const currentUserId = (socket.auth as any)?.userId;
+      if (oderId === currentUserId) {
+        // This is the current user - unmute them
         try {
           const track = (getAgoraClient() as any).__localAudioTrack;
           if (track) track.setEnabled(true);
-        } catch {}
+        } catch (err) {
+          console.error('[Agora] speak-granted: failed to enable track:', err);
+        }
       }
       set((s) => ({
+        isMuted: oderId === currentUserId ? false : s.isMuted,
         participants: s.participants.map((p) => p.oderId === oderId ? { ...p, isMuted: false, isSpeaking: true } : p),
       }));
     });
 
     socket.on('speak-revoked', ({ oderId }: { oderId: number }) => {
-      if (oderId === (socket.auth as any)?.userId) {
+      const currentUserId = (socket.auth as any)?.userId;
+      if (oderId === currentUserId) {
+        // This is the current user - mute them
         try {
           const track = (getAgoraClient() as any).__localAudioTrack;
           if (track) track.setEnabled(false);
-        } catch {}
+        } catch (err) {
+          console.error('[Agora] speak-revoked: failed to disable track:', err);
+        }
       }
       set((s) => ({
+        isMuted: oderId === currentUserId ? true : s.isMuted,
         participants: s.participants.map((p) => p.oderId === oderId ? { ...p, isMuted: true, isSpeaking: false } : p),
       }));
     });
@@ -180,8 +203,43 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       set({ isRecording: true, recordingId });
     });
 
-    socket.on('recording-stopped', () => {
+    socket.on('recording-stopped', ({ podcastId }: { podcastId: string }) => {
       set({ isRecording: false, recordingId: null });
+
+      const mixer = (globalThis as any).__lucyMixer as LucyMixer;
+      if (mixer.recorder && mixer.recorder.state !== 'inactive') {
+        mixer.recorder.onstop = async () => {
+          const blob = new Blob(mixer.chunks, { type: 'audio/webm' });
+          mixer.chunks = [];
+
+          const formData = new FormData();
+          formData.append('audio', blob, `podcast-${podcastId}.webm`);
+
+          try {
+            const res = await fetch(`http://localhost:3001/api/podcasts/${podcastId}/upload`, {
+              method: 'POST',
+              body: formData,
+            });
+            const data = await res.json();
+            if (data.success) {
+              toast.success('Podcast saved successfully!');
+            } else {
+              toast.error('Failed to upload podcast');
+            }
+          } catch (err) {
+            console.error('Failed to upload podcast', err);
+            toast.error('Failed to upload podcast');
+          }
+
+          // cleanup
+          if (mixer.context) {
+            mixer.context.close();
+            mixer.context = null;
+            mixer.dest = null;
+          }
+        };
+        mixer.recorder.stop();
+      }
     });
 
     socket.on('room-closed', async () => {
@@ -195,6 +253,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     socket.on('error', ({ message }: { message: string }) => {
       console.error('[Socket error]', message);
+      toast.error(message);
+      if (message === 'Room not found') {
+        set({ joiningRoomId: null, currentRoom: null });
+        window.location.href = '/browse';
+      }
     });
   },
 
@@ -261,15 +324,28 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   toggleMute: () => {
-    const { socket, currentRoom, isMuted } = get();
+    const { socket, currentRoom, isMuted, agoraJoined, agoraReady } = get();
     if (socket && currentRoom) {
       const newMutedState = !isMuted;
       socket.emit('toggle-mute', { roomId: currentRoom.id, muted: newMutedState });
       set({ isMuted: newMutedState });
-      try {
-        const track = (getAgoraClient() as any).__localAudioTrack;
-        if (track) track.setEnabled(!newMutedState);
-      } catch {}
+
+      // Only modify track if Agora is ready
+      if (agoraJoined && agoraReady) {
+        try {
+          const track = (getAgoraClient() as any).__localAudioTrack;
+          if (track) {
+            track.setEnabled(!newMutedState);
+            console.log('[Agora] Mute toggled:', newMutedState ? 'muted' : 'unmuted');
+          } else {
+            console.warn('[Agora] Toggle mute called but no local audio track exists');
+          }
+        } catch (err) {
+          console.error('[Agora] Failed to toggle mute:', err);
+        }
+      } else {
+        console.warn('[Agora] Toggle mute called but Agora not joined yet');
+      }
     }
   },
 
@@ -281,10 +357,43 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   startRecording: () => {
-    const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('start-recording', { roomId: currentRoom.id });
+    const { socket, currentRoom, agoraJoined } = get();
+    if (!socket || !currentRoom || !agoraJoined) return;
+
+    const mixer = (globalThis as any).__lucyMixer as LucyMixer;
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    mixer.context = new AudioCtx();
+    mixer.dest = mixer.context.createMediaStreamDestination();
+
+    const client = getAgoraClient();
+
+    // Add local track
+    const localTrack = (client as any).__localAudioTrack;
+    if (localTrack) {
+      const stream = new MediaStream([localTrack.getMediaStreamTrack()]);
+      const source = mixer.context.createMediaStreamSource(stream);
+      source.connect(mixer.dest);
     }
+
+    // Add existing remote tracks
+    if (client.remoteUsers) {
+      client.remoteUsers.forEach((user: any) => {
+        if (user.audioTrack) {
+          const stream = new MediaStream([user.audioTrack.getMediaStreamTrack()]);
+          const source = mixer.context!.createMediaStreamSource(stream);
+          source.connect(mixer.dest!);
+        }
+      });
+    }
+
+    mixer.chunks = [];
+    mixer.recorder = new MediaRecorder(mixer.dest.stream, { mimeType: 'audio/webm' });
+    mixer.recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) mixer.chunks.push(e.data);
+    };
+    mixer.recorder.start();
+
+    socket.emit('start-recording', { roomId: currentRoom.id });
   },
 
   stopRecording: () => {
@@ -335,13 +444,47 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   switchMicrophone: async (id: string) => {
     set({ selectedMicrophoneId: id });
+
     try {
-      const track = (getAgoraClient() as any).__localAudioTrack;
-      if (track) {
-        await track.setDevice(id);
+      const client = getAgoraClient();
+      const existingTrack = (client as any).__localAudioTrack;
+
+      if (existingTrack) {
+        // Close existing track
+        try {
+          await client.unpublish(existingTrack);
+          existingTrack.close();
+        } catch { }
+        delete (client as any).__localAudioTrack;
       }
+
+      // Check microphone permission first
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: id ? { deviceId: { exact: id } } : true
+        });
+        stream.getTracks().forEach(track => track.stop());
+        console.log('[Agora] Microphone permission granted for device:', id || 'default');
+      } catch (permErr) {
+        console.error('[Agora] Microphone permission denied:', permErr);
+        toast.error('Microphone permission denied. Please allow microphone access.');
+        return;
+      }
+
+      // Create new track with selected microphone
+      const { isMuted } = get();
+      const newTrack = await AgoraRTC.createMicrophoneAudioTrack(
+        id ? { microphoneId: id } : undefined
+      );
+
+      newTrack.setEnabled(!isMuted);
+      await client.publish(newTrack);
+      (client as any).__localAudioTrack = newTrack;
+
+      console.log('[Agora] Switched to microphone:', id || 'default');
     } catch (err) {
-      console.error('[Agora] Failed to switch device:', err);
+      console.error('[Agora] Failed to switch microphone:', err);
+      toast.error('Failed to switch microphone');
     }
   },
 
@@ -369,61 +512,101 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     return null;
   },
 
-  joinAgoraChannel: async (userId: number) => {
+  joinAgoraChannel: async (userId: number, roomId: string) => {
+    const already = get();
+    if (already.agoraJoining || already.agoraJoined) return;
+
     try {
-      const { currentRoom, isMuted } = get();
-      if (!currentRoom) return;
+      set({ agoraJoining: true });
+      const { isMuted, selectedMicrophoneId } = get();
 
       const appId = import.meta.env.VITE_AGORA_APP_ID as string | undefined;
       if (!appId || appId === 'YOUR_AGORA_APP_ID') {
         console.warn('[Agora] VITE_AGORA_APP_ID not set — skipping WebRTC join.');
+        set({ agoraJoining: false });
         return;
       }
 
       const client = getAgoraClient();
 
-      // Leave if already connected
       if ((client.connectionState as string) !== 'DISCONNECTED') {
         await client.leave();
       }
 
-      const channelName = String(currentRoom.id);
+      const channelName = roomId;
       const uid = userId;
 
-      // Fetch Agora token from backend
       let token: string | null = null;
       try {
         const res = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
         if (res.ok) {
           const data = await res.json();
           token = data.token ?? null;
+          console.log('[Agora] Token fetched, expiresAt:', data.expiresAt ? new Date(data.expiresAt).toISOString() : 'N/A');
+        } else {
+          console.warn('[Agora] Token fetch failed with status:', res.status);
         }
-      } catch {
-        console.warn('[Agora] Token fetch failed — joining without token (test mode).');
+      } catch (err) {
+        console.warn('[Agora] Token fetch threw:', err);
       }
 
       await client.join(appId, channelName, token || undefined, uid);
+      console.log('[Agora] Joined channel:', channelName, 'uid:', uid);
 
-      const { selectedMicrophoneId } = get();
+      // Request microphone permission first
+      try {
+        console.log('[Agora] Requesting microphone permission...');
+        const permissionStream = await navigator.mediaDevices.getUserMedia({
+          audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
+        });
+        // Stop the tracks immediately - Agora will request its own
+        permissionStream.getTracks().forEach(track => track.stop());
+        console.log('[Agora] Microphone permission granted');
+      } catch (permErr) {
+        console.error('[Agora] Microphone permission denied:', permErr);
+        toast.error('Microphone permission denied. Please allow microphone access in your browser.');
+        await client.leave();
+        set({ agoraJoining: false });
+        return;
+      }
 
-      // Create and publish local microphone track
-      const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack(
-        selectedMicrophoneId ? { microphoneId: selectedMicrophoneId } : undefined
-      );
+      // Create microphone track
+      const audioConfig = selectedMicrophoneId 
+        ? { microphoneId: selectedMicrophoneId, AEC: true, ANS: false, AGC: true }
+        : { AEC: true, ANS: false, AGC: true };
+      
+      const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack(audioConfig);
       localAudioTrack.setEnabled(!isMuted);
-      await client.publish(localAudioTrack);
+      console.log('[Agora] Microphone track created, muted:', isMuted);
 
-      // Listen for remote audio tracks
+      await client.publish(localAudioTrack);
+      console.log('[Agora] Published local audio track');
+
       client.on('user-published', async (remoteUser: any, mediaType: string) => {
         if (mediaType !== 'audio') return;
         await client.subscribe(remoteUser, mediaType);
         remoteUser.audioTrack?.play();
+        console.log('[Agora] Remote user published audio:', remoteUser.uid);
+
+        // Mix remote audio if recording is active
+        const mixer = (globalThis as any).__lucyMixer as LucyMixer;
+        if (mixer?.context && mixer?.dest && remoteUser.audioTrack) {
+          try {
+            const stream = new MediaStream([remoteUser.audioTrack.getMediaStreamTrack()]);
+            const source = mixer.context.createMediaStreamSource(stream);
+            source.connect(mixer.dest);
+          } catch (err) {
+            console.warn('[Agora] Failed to attach remote stream to mixer:', err);
+          }
+        }
       });
 
-      // Store reference for cleanup
+      client.on('connection-state-change', (state: string, prevState: string) => {
+        console.log('[Agora] Connection state:', prevState, '→', state);
+      });
+
       (client as any).__localAudioTrack = localAudioTrack;
-      
-      // Start True Audio Latency Probe
+
       const timer = window.setInterval(() => {
         try {
           if (client.connectionState === 'CONNECTED') {
@@ -432,16 +615,19 @@ export const useRoomStore = create<RoomState>((set, get) => ({
               set({ latencyMs: stats.RTT });
             }
           }
-        } catch {}
+        } catch { }
       }, 2000);
-      set({ agoraReady: true, latencyTimer: timer as any });
+
+      set({ agoraReady: true, agoraJoined: true, agoraJoining: false, latencyTimer: timer as any });
     } catch (err) {
       console.error('[Agora] Failed to join channel:', err);
+      toast.error('Failed to join audio channel. Please check your connection.');
+      set({ agoraJoining: false });
     }
   },
 
   leaveAgoraChannel: async () => {
-    set({ agoraReady: false });
+    set({ agoraReady: false, agoraJoined: false, agoraJoining: false });
     const { latencyTimer } = get();
     if (latencyTimer) {
       window.clearInterval(latencyTimer);

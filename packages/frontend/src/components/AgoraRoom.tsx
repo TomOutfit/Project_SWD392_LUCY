@@ -35,60 +35,31 @@ export function AgoraRoom() {
   }, []);
 
   useEffect(() => {
-    let audioContext: AudioContext;
-    let analyzer: AnalyserNode;
-    let microphone: MediaStreamAudioSourceNode;
     let raf: number;
-
-    const startAudio = () => {
-      if (!agoraReady) return;
-      const track = useRoomStore.getState().getLocalMediaStreamTrack();
-      if (!track) return;
-      
-      try {
-        const stream = new MediaStream([track]);
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        audioContext = new AudioCtx();
-        analyzer = audioContext.createAnalyser();
-        microphone = audioContext.createMediaStreamSource(stream);
-        microphone.connect(analyzer);
-        analyzer.fftSize = 256;
-        const bufferLength = analyzer.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-
-        const updateVol = () => {
-          analyzer.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i];
-          }
-          const vol = sum / bufferLength;
-          if (volumeBarRef.current) {
-            const widthPercent = isMuted ? 0 : Math.min(100, (vol / 60) * 100);
-            volumeBarRef.current.style.width = `${widthPercent}%`;
-          }
-          raf = requestAnimationFrame(updateVol);
-        };
-        updateVol();
-      } catch (err) {}
+    const updateVol = () => {
+      const vol = isMuted ? 0 : useRoomStore.getState().getLocalVolumeLevel();
+      if (volumeBarRef.current) {
+        // vol is between 0 and 100, add a small multiplier to make it more sensitive
+        volumeBarRef.current.style.width = `${Math.min(100, vol * 1.5)}%`;
+      }
+      raf = requestAnimationFrame(updateVol);
     };
-
-    startAudio();
+    
+    if (agoraReady) {
+      updateVol();
+    }
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
-      if (audioContext && audioContext.state !== 'closed') audioContext.close();
     };
-  }, [isMuted, selectedMicrophoneId, agoraReady]);
+  }, [isMuted, agoraReady]);
 
   useEffect(() => {
     if (currentRoom && user) {
-      const { joinRoom: doJoin, joiningRoomId, joinAgoraChannel } = useRoomStore.getState();
+      const { joinRoom: doJoin, joiningRoomId } = useRoomStore.getState();
       if (joiningRoomId !== currentRoom.id) {
         doJoin(currentRoom.id);
       }
-      // Initialize Agora connection and local audio track
-      joinAgoraChannel(user.id);
     }
   }, [currentRoom?.id, user?.id]);
 
@@ -225,9 +196,9 @@ export function AgoraRoom() {
               Participants ({participants.length})
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {participants.map((p) => (
+              {participants.map((p, idx) => (
                 <motion.div
-                  key={p.oderId}
+                  key={`${p.oderId}-${idx}`}
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   className={`p-3 rounded-xl border text-center transition-all ${
@@ -423,8 +394,8 @@ export function AgoraRoom() {
         </div>
         {selectedGift && (
           <div className="mt-4 flex gap-2 flex-wrap">
-            {participants.filter(p => p.oderId !== user.id).map(p => (
-              <button key={p.oderId}
+            {participants.filter(p => p.oderId !== user.id).map((p, idx) => (
+              <button key={`${p.oderId}-${idx}`}
                 onClick={() => handleSendGift(p.oderId, p.oderName)}
                 className="flex-1 p-2 rounded-lg bg-navy border border-ghost hover:border-cyan transition-all text-center min-w-[80px]">
                 <Avatar personaId={p.oderPersonaId} name={p.oderName} size="sm" className="mx-auto mb-1" />
