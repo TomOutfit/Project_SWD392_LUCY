@@ -14,11 +14,17 @@ import toast from 'react-hot-toast';
 export function AgoraRoom() {
   const {
     currentRoom, participants, handQueue, isMuted, isSpeaking, handRaised,
-    pinnedContent, isRecording, giftEvents, leaveRoom,
+    pinnedContent, isRecording, recordingTime, giftEvents, leaveRoom,
     handRaise, handLower, toggleMute, grantSpeak, revokeSpeak,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
     latencyMs, selectedMicrophoneId, switchMicrophone, agoraReady
   } = useRoomStore();
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   const { user, updateBalance } = useAuthStore();
   const [showGiftModal, setShowGiftModal] = useState(false);
@@ -31,7 +37,7 @@ export function AgoraRoom() {
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices().then(devices => {
       setMicrophones(devices.filter(d => d.kind === 'audioinput'));
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -44,7 +50,7 @@ export function AgoraRoom() {
       }
       raf = requestAnimationFrame(updateVol);
     };
-    
+
     if (agoraReady) {
       updateVol();
     }
@@ -157,7 +163,7 @@ export function AgoraRoom() {
             <div className="flex items-center gap-3 mb-4 px-2">
               <Mic className={`w-5 h-5 ${isMuted ? 'text-rose-500' : 'text-mist'}`} />
               <div className="flex-1 h-3 bg-midnight rounded-full overflow-hidden border border-ghost">
-                <div 
+                <div
                   ref={volumeBarRef}
                   className={`h-full rounded-full transition-all duration-75 ${isMuted ? 'bg-rose-500/50' : 'bg-blue-500'}`}
                   style={{ width: '0%' }}
@@ -201,11 +207,10 @@ export function AgoraRoom() {
                   key={`${p.oderId}-${idx}`}
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className={`p-3 rounded-xl border text-center transition-all ${
-                    p.isSpeaking && !p.isMuted
+                  className={`p-3 rounded-xl border text-center transition-all ${p.isSpeaking && !p.isMuted
                       ? 'border-cyan bg-cyan/10 shadow-cyan'
                       : 'border-ghost bg-midnight'
-                  }`}
+                    }`}
                   onClick={() => isHost && p.oderId !== user.id && (p.isSpeaking ? revokeSpeak(p.oderId) : grantSpeak(p.oderId))}
                   title={isHost ? 'Click to grant/revoke speak' : undefined}
                 >
@@ -344,9 +349,11 @@ export function AgoraRoom() {
                   <Pin className="w-4 h-4" /> Custom Pin
                 </Button>
                 {isSuper && (
-                  <Button variant={isRecording ? 'magenta' : 'ghost'} className="w-full justify-start"
+                  <Button variant={isRecording ? 'ghost' : 'ghost'} className={`w-full justify-start ${isRecording ? 'text-[#ff4d4d] hover:text-[#cc0000]' : ''}`}
                     onClick={isRecording ? stopRecording : startRecording}>
-                    <Film className="w-4 h-4" /> {isRecording ? 'Stop Recording' : 'Record Podcast'}
+                    <Film className={`w-4 h-4 ${isRecording ? 'animate-pulse' : ''}`} />
+                    {isRecording ? 'Stop Recording' : 'Record Podcast'}
+                    {isRecording && <span className="font-mono text-xs opacity-80 ml-auto">{formatTime(recordingTime)}</span>}
                   </Button>
                 )}
                 <Button variant="ghost" className="w-full justify-start text-magenta hover:text-magenta" onClick={closeRoom}>
@@ -357,7 +364,14 @@ export function AgoraRoom() {
 
             {/* Microphone Switcher in Room */}
             <div className="mt-4 pt-4 border-t border-ghost">
-              <label className="text-[10px] font-bold text-mist uppercase tracking-wider mb-1.5 block">Microphone</label>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="text-[10px] font-bold text-mist uppercase tracking-wider block">Microphone</label>
+                {latencyMs !== null && (
+                  <span className={`text-[10px] font-mono ${latencyMs < 100 ? 'text-green-400' : latencyMs < 200 ? 'text-yellow-400' : 'text-red-400'}`}>
+                    Ping: {latencyMs}ms
+                  </span>
+                )}
+              </div>
               <select
                 className="w-full bg-navy border border-ghost rounded-lg px-2 py-1.5 text-xs text-[#F0F4FF] outline-none focus:border-cyan transition-all"
                 value={selectedMicrophoneId || ''}
@@ -382,9 +396,8 @@ export function AgoraRoom() {
             <button
               key={gift.id}
               onClick={() => setSelectedGift(gift)}
-              className={`p-4 rounded-xl border text-center transition-all ${
-                selectedGift?.id === gift.id ? 'border-cyan bg-cyan/10' : 'border-ghost hover:border-violet/50'
-              }`}
+              className={`p-4 rounded-xl border text-center transition-all ${selectedGift?.id === gift.id ? 'border-cyan bg-cyan/10' : 'border-ghost hover:border-violet/50'
+                }`}
             >
               <span className="text-3xl block mb-2">{gift.emoji}</span>
               <p className="text-xs font-exo font-semibold text-[#F0F4FF]">{gift.name}</p>
@@ -424,9 +437,8 @@ export function AgoraRoom() {
             <div className="flex gap-2 mt-1.5 flex-wrap">
               {(['vocabulary', 'grammar', 'conversation', 'pdf'] as const).map(type => (
                 <button key={type} onClick={() => setPinForm(p => ({ ...p, type }))}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-exo transition-all ${
-                    pinForm.type === type ? 'border-cyan bg-cyan/10 text-cyan' : 'border-ghost text-mist hover:border-violet/50'
-                  }`}>
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-exo transition-all ${pinForm.type === type ? 'border-cyan bg-cyan/10 text-cyan' : 'border-ghost text-mist hover:border-violet/50'
+                    }`}>
                   {type}
                 </button>
               ))}

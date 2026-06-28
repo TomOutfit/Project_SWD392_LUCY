@@ -33,6 +33,8 @@ interface RoomState {
   pinnedContent: ContentPin | null;
   isRecording: boolean;
   recordingId: string | null;
+  recordingTime: number;
+  recordingTimerInterval: number | null;
   joiningRoomId: string | null;
   latencyMs: number | null;
   latencyTimer: number | null;
@@ -88,6 +90,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   pinnedContent: null,
   isRecording: false,
   recordingId: null,
+  recordingTime: 0,
+  recordingTimerInterval: null,
   joiningRoomId: null,
   latencyMs: null,
   latencyTimer: null,
@@ -200,11 +204,16 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
 
     socket.on('recording-started', ({ recordingId }: { recordingId: string }) => {
-      set({ isRecording: true, recordingId });
+      const interval = window.setInterval(() => {
+        set((state) => ({ recordingTime: state.recordingTime + 1 }));
+      }, 1000);
+      set({ isRecording: true, recordingId, recordingTime: 0, recordingTimerInterval: interval as any });
     });
 
     socket.on('recording-stopped', ({ podcastId }: { podcastId: string }) => {
-      set({ isRecording: false, recordingId: null });
+      const { recordingTimerInterval } = get();
+      if (recordingTimerInterval) window.clearInterval(recordingTimerInterval);
+      set({ isRecording: false, recordingId: null, recordingTimerInterval: null });
 
       const mixer = (globalThis as any).__lucyMixer as LucyMixer;
       if (mixer.recorder && mixer.recorder.state !== 'inactive') {
@@ -550,7 +559,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         console.warn('[Agora] Token fetch threw:', err);
       }
 
-      await client.join(appId, channelName, token || undefined, uid);
+      await client.join(appId, channelName, token || null, uid);
       console.log('[Agora] Joined channel:', channelName, 'uid:', uid);
 
       // Request microphone permission first
@@ -619,7 +628,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       }, 2000);
 
       set({ agoraReady: true, agoraJoined: true, agoraJoining: false, latencyTimer: timer as any });
-    } catch (err) {
+    } catch (err: any) {
+      if (String(err).includes('OPERATION_ABORTED')) {
+        console.log('[Agora] Join operation aborted cleanly.');
+        set({ agoraJoining: false });
+        return;
+      }
       console.error('[Agora] Failed to join channel:', err);
       toast.error('Failed to join audio channel. Please check your connection.');
       set({ agoraJoining: false });
