@@ -21,6 +21,15 @@ interface LucyMixer {
 }
 (globalThis as any).__lucyMixer = { context: null, dest: null, recorder: null, chunks: [] } as LucyMixer;
 
+interface AudioMonitor {
+  context: AudioContext | null;
+  gainNode: GainNode | null;
+  streamDest: MediaStreamAudioDestinationNode | null;
+  sourceNode: MediaStreamAudioSourceNode | null;
+  isConnected: boolean;
+}
+(globalThis as any).__lucyAudioMonitor = { context: null, gainNode: null, streamDest: null, sourceNode: null, isConnected: false } as AudioMonitor;
+
 interface RoomState {
   socket: Socket | null;
   currentRoom: Room | null;
@@ -51,6 +60,7 @@ interface RoomState {
   } | null;
   selectedMicrophoneId: string | null;
   agoraReady: boolean;
+  isSelfMonitoring: boolean;
 
   connectSocket: (userId: number, userName: string, personaId: number, role: string, pendingRoomId?: string) => void;
 
@@ -76,6 +86,7 @@ interface RoomState {
   leaveAgoraChannel: () => Promise<void>;
   getLocalVolumeLevel: () => number;
   getLocalMediaStreamTrack: () => MediaStreamTrack | null;
+  toggleSelfMonitoring: () => void;
 }
 
 export const useRoomStore = create<RoomState>((set, get) => ({
@@ -101,6 +112,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   recommendation: null,
   selectedMicrophoneId: null,
   agoraReady: false,
+  isSelfMonitoring: false,
 
   connectSocket: (userId, userName, personaId, role, pendingRoomId) => {
     const existingSocket = get().socket;
@@ -335,13 +347,32 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   toggleMute: () => {
-    const { socket, currentRoom, isMuted, agoraJoined, agoraReady } = get();
+    const { socket, currentRoom, isMuted, agoraJoined, agoraReady, isSelfMonitoring } = get();
     if (socket && currentRoom) {
       const newMutedState = !isMuted;
       socket.emit('toggle-mute', { roomId: currentRoom.id, muted: newMutedState });
       set({ isMuted: newMutedState });
 
-      // Only modify track if Agora is ready
+      if (isSelfMonitoring && newMutedState) {
+        const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
+        if (monitor.sourceNode) {
+          monitor.sourceNode.disconnect();
+        }
+        if (monitor.gainNode) {
+          monitor.gainNode.disconnect();
+        }
+        if (monitor.context && monitor.context.state !== 'closed') {
+          monitor.context.close();
+        }
+        monitor.context = null;
+        monitor.gainNode = null;
+        monitor.sourceNode = null;
+        monitor.streamDest = null;
+        monitor.isConnected = false;
+        set({ isSelfMonitoring: false });
+        console.log('[Audio Monitor] Auto-disabled due to mute');
+      }
+
       if (agoraJoined && agoraReady) {
         try {
           const track = (getAgoraClient() as any).__localAudioTrack;
@@ -456,12 +487,31 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   switchMicrophone: async (id: string) => {
     set({ selectedMicrophoneId: id });
 
+    const wasMonitoring = get().isSelfMonitoring;
+    const { isMuted } = get();
+
+    if (wasMonitoring) {
+      const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
+      if (monitor.isConnected) {
+        if (monitor.sourceNode) monitor.sourceNode.disconnect();
+        if (monitor.gainNode) monitor.gainNode.disconnect();
+        if (monitor.context && monitor.context.state !== 'closed') {
+          monitor.context.close();
+        }
+        monitor.context = null;
+        monitor.gainNode = null;
+        monitor.sourceNode = null;
+        monitor.streamDest = null;
+        monitor.isConnected = false;
+        set({ isSelfMonitoring: false });
+      }
+    }
+
     try {
       const client = getAgoraClient();
       const existingTrack = (client as any).__localAudioTrack;
 
       if (existingTrack) {
-        // Close existing track
         try {
           await client.unpublish(existingTrack);
           existingTrack.close();
@@ -469,7 +519,6 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         delete (client as any).__localAudioTrack;
       }
 
-      // Check microphone permission first
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: id ? { deviceId: { exact: id } } : true
@@ -482,8 +531,6 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         return;
       }
 
-      // Create new track with selected microphone
-      const { isMuted } = get();
       const newTrack = await AgoraRTC.createMicrophoneAudioTrack(
         id ? { microphoneId: id } : undefined
       );
@@ -491,6 +538,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       newTrack.setEnabled(!isMuted);
       await client.publish(newTrack);
       (client as any).__localAudioTrack = newTrack;
+
+      if (wasMonitoring && !isMuted) {
+        setTimeout(() => {
+          get().toggleSelfMonitoring();
+        }, 100);
+      }
 
       console.log('[Agora] Switched to microphone:', id || 'default');
     } catch (err) {
@@ -521,6 +574,71 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       // noop
     }
     return null;
+  },
+
+  toggleSelfMonitoring: () => {
+    const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
+    const { isMuted } = get();
+
+    if (isMuted) {
+      toast.error('Cannot enable monitoring while muted. Please unmute first.');
+      return;
+    }
+
+    try {
+      if (!monitor.isConnected) {
+        const client = getAgoraClient();
+        const localTrack = (client as any).__localAudioTrack;
+        if (!localTrack) {
+          console.warn('[Audio Monitor] No local audio track available');
+          toast.error('Microphone not ready. Please try again.');
+          return;
+        }
+
+        const mediaStreamTrack = localTrack.getMediaStreamTrack();
+        if (!mediaStreamTrack) {
+          console.warn('[Audio Monitor] No media stream track available');
+          return;
+        }
+
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        monitor.context = new AudioCtx();
+        monitor.gainNode = monitor.context.createGain();
+        monitor.gainNode.gain.value = 0.3;
+        monitor.streamDest = monitor.context.createMediaStreamDestination();
+        monitor.sourceNode = monitor.context.createMediaStreamSource(mediaStreamTrack);
+
+        monitor.sourceNode.connect(monitor.gainNode);
+        monitor.gainNode.connect(monitor.streamDest);
+        monitor.gainNode.connect(monitor.context.destination);
+
+        monitor.isConnected = true;
+        console.log('[Audio Monitor] Monitoring enabled - you will hear your own voice');
+        toast.success('Self-monitoring enabled');
+        set({ isSelfMonitoring: true });
+      } else {
+        if (monitor.sourceNode) {
+          monitor.sourceNode.disconnect();
+        }
+        if (monitor.gainNode) {
+          monitor.gainNode.disconnect();
+        }
+        if (monitor.context && monitor.context.state !== 'closed') {
+          monitor.context.close();
+        }
+        monitor.context = null;
+        monitor.gainNode = null;
+        monitor.sourceNode = null;
+        monitor.streamDest = null;
+        monitor.isConnected = false;
+        console.log('[Audio Monitor] Monitoring disabled');
+        toast.success('Self-monitoring disabled');
+        set({ isSelfMonitoring: false });
+      }
+    } catch (err) {
+      console.error('[Audio Monitor] Failed to toggle monitoring:', err);
+      toast.error('Failed to toggle self-monitoring');
+    }
   },
 
   joinAgoraChannel: async (userId: number, roomId: string) => {
@@ -643,12 +761,27 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   leaveAgoraChannel: async () => {
-    set({ agoraReady: false, agoraJoined: false, agoraJoining: false });
+    set({ agoraReady: false, agoraJoined: false, agoraJoining: false, isSelfMonitoring: false });
     const { latencyTimer } = get();
     if (latencyTimer) {
       window.clearInterval(latencyTimer);
       set({ latencyTimer: null, latencyMs: null });
     }
+
+    const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
+    if (monitor.isConnected) {
+      if (monitor.sourceNode) monitor.sourceNode.disconnect();
+      if (monitor.gainNode) monitor.gainNode.disconnect();
+      if (monitor.context && monitor.context.state !== 'closed') {
+        monitor.context.close();
+      }
+      monitor.context = null;
+      monitor.gainNode = null;
+      monitor.sourceNode = null;
+      monitor.streamDest = null;
+      monitor.isConnected = false;
+    }
+
     try {
       const client = getAgoraClient();
       if ((client.connectionState as string) !== 'DISCONNECTED') {

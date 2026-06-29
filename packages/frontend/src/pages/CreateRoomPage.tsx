@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mic2, Globe, BookOpen, Settings2 } from 'lucide-react';
+import { Mic2, Globe, BookOpen, Settings2, Volume2, VolumeX } from 'lucide-react';
 import { levelsApi, roomsApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { useRoomStore } from '@/stores/roomStore';
@@ -18,6 +18,7 @@ export default function CreateRoomPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([]);
+  const [previewMonitoring, setPreviewMonitoring] = useState(false);
   const [form, setForm] = useState({
     name: '',
     language: 'EN' as Language,
@@ -42,11 +43,34 @@ export default function CreateRoomPage() {
   }, []);
 
   const volumeBarRef = useRef<HTMLDivElement>(null);
-  
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const streamDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+
+  const togglePreviewMonitoring = () => {
+    const newState = !previewMonitoring;
+    setPreviewMonitoring(newState);
+
+    if (gainNodeRef.current && audioContextRef.current) {
+      if (newState) {
+        gainNodeRef.current.gain.value = 0.3;
+        gainNodeRef.current.connect(audioContextRef.current.destination);
+        console.log('[CreateRoomPage] Audio monitoring enabled for preview');
+      } else {
+        gainNodeRef.current.gain.value = 0;
+        gainNodeRef.current.disconnect();
+        console.log('[CreateRoomPage] Audio monitoring disabled for preview');
+      }
+    }
+  };
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+
   useEffect(() => {
     let audioContext: AudioContext;
     let analyzer: AnalyserNode;
     let microphone: MediaStreamAudioSourceNode;
+    let gainNode: GainNode;
+    let streamDest: MediaStreamAudioDestinationNode;
     let raf: number;
     let activeStream: MediaStream;
 
@@ -56,9 +80,24 @@ export default function CreateRoomPage() {
           audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
         });
         audioContext = new window.AudioContext();
+        audioContextRef.current = audioContext;
         analyzer = audioContext.createAnalyser();
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = previewMonitoring ? 0.3 : 0;
+        streamDest = audioContext.createMediaStreamDestination();
         microphone = audioContext.createMediaStreamSource(activeStream);
+
         microphone.connect(analyzer);
+        microphone.connect(gainNode);
+        gainNode.connect(streamDest);
+
+        if (previewMonitoring) {
+          gainNode.connect(audioContext.destination);
+        }
+
+        gainNodeRef.current = gainNode;
+        streamDestRef.current = streamDest;
+
         analyzer.fftSize = 256;
         const bufferLength = analyzer.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
@@ -69,7 +108,7 @@ export default function CreateRoomPage() {
           for (let i = 0; i < bufferLength; i++) {
             sum += dataArray[i];
           }
-          const vol = sum / bufferLength; // 0 to 255
+          const vol = sum / bufferLength;
           if (volumeBarRef.current) {
             volumeBarRef.current.style.width = `${Math.min(100, (vol / 60) * 100)}%`;
           }
@@ -77,7 +116,7 @@ export default function CreateRoomPage() {
         };
         updateVol();
       } catch (err) {
-        // user denied or no mic
+        console.error('[CreateRoomPage] Audio preview error:', err);
       }
     };
     startAudio();
@@ -86,6 +125,9 @@ export default function CreateRoomPage() {
       if (raf) cancelAnimationFrame(raf);
       if (audioContext && audioContext.state !== 'closed') audioContext.close();
       if (activeStream) activeStream.getTracks().forEach(t => t.stop());
+      audioContextRef.current = null;
+      gainNodeRef.current = null;
+      streamDestRef.current = null;
     };
   }, [selectedMicrophoneId]);
 
@@ -205,17 +247,33 @@ export default function CreateRoomPage() {
             <label className="text-sm font-exo font-medium text-mist mb-2 flex items-center gap-1.5">
               <Settings2 className="w-4 h-4" /> Microphone
             </label>
-            
+
             <div className="flex items-center gap-3 mb-3 px-2">
               <Mic2 className="w-5 h-5 text-mist" />
               <div className="flex-1 h-3 bg-midnight rounded-full overflow-hidden border border-ghost">
-                <div 
+                <div
                   ref={volumeBarRef}
                   className="h-full bg-[#1A73E8] rounded-full transition-all duration-75"
                   style={{ width: '0%' }}
                 />
               </div>
+              <button
+                onClick={togglePreviewMonitoring}
+                className={`p-2 rounded-lg border transition-all ${
+                  previewMonitoring
+                    ? 'bg-cyan/20 border-cyan text-cyan'
+                    : 'bg-midnight border-ghost text-mist hover:border-violet/50'
+                }`}
+                title={previewMonitoring ? 'Disable self-monitoring' : 'Enable self-monitoring (hear your voice)'}
+              >
+                {previewMonitoring ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </button>
             </div>
+            {previewMonitoring && (
+              <p className="text-xs text-cyan/80 mb-2 px-2">
+                Self-monitoring enabled - you can hear your own voice
+              </p>
+            )}
 
             <select
               className="w-full bg-midnight border border-ghost rounded-xl px-4 py-3 text-sm text-[#F0F4FF] outline-none focus:border-cyan transition-all"

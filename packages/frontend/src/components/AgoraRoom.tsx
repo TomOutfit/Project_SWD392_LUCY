@@ -1,7 +1,7 @@
 // src/components/AgoraRoom.tsx
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi } from 'lucide-react';
+import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX } from 'lucide-react';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -17,7 +17,8 @@ export function AgoraRoom() {
     pinnedContent, isRecording, recordingTime, giftEvents, leaveRoom,
     handRaise, handLower, toggleMute, grantSpeak, revokeSpeak,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
-    latencyMs, selectedMicrophoneId, switchMicrophone, agoraReady
+    latencyMs, selectedMicrophoneId, switchMicrophone, agoraReady,
+    isSelfMonitoring, toggleSelfMonitoring
   } = useRoomStore();
 
   const formatTime = (seconds: number) => {
@@ -384,6 +385,42 @@ export function AgoraRoom() {
                   </option>
                 ))}
               </select>
+
+              {/* Self-Monitoring Toggle */}
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {isSelfMonitoring ? (
+                    <Volume2 className="w-4 h-4 text-cyan" />
+                  ) : (
+                    <VolumeX className="w-4 h-4 text-mist" />
+                  )}
+                  <span className="text-xs text-mist">Self-Monitor</span>
+                </div>
+                <button
+                  onClick={toggleSelfMonitoring}
+                  disabled={isMuted}
+                  className={`relative w-10 h-5 rounded-full transition-all ${
+                    isMuted
+                      ? 'bg-midnight cursor-not-allowed opacity-50'
+                      : isSelfMonitoring
+                        ? 'bg-cyan'
+                        : 'bg-ghost hover:bg-violet/50'
+                  }`}
+                  title={isMuted ? 'Unmute first to enable self-monitoring' : isSelfMonitoring ? 'Disable self-monitoring' : 'Enable self-monitoring (hear your own voice)'}
+                >
+                  <div
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
+                      isSelfMonitoring ? 'left-5' : 'left-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              {isSelfMonitoring && !isMuted && (
+                <p className="text-[10px] text-cyan/70 mt-1.5">You can now hear your own voice</p>
+              )}
+              {isMuted && (
+                <p className="text-[10px] text-rose-400/70 mt-1.5">Unmute to enable self-monitoring</p>
+              )}
             </div>
           </div>
         </div>
