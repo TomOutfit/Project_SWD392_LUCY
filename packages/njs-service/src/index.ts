@@ -4,6 +4,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { v4 as uuidv4 } from 'uuid';
 import { getAllLevels, getLevelById, getLevelsByLanguage } from './controllers/levelController.js';
 import { getRooms, getPodcasts, getAgoraToken } from './controllers/roomController.js';
 import { registerSocketHandlers, createRoomInMemory, getActiveRooms, setIO, forceNextSublevel } from './services/roomService.js';
@@ -79,6 +80,30 @@ app.post('/api/podcasts/:id/upload', upload.single('audio'), async (req, res) =>
     console.error('Failed to update podcast fileUrl:', err);
     res.status(500).json({ error: 'Database update failed' });
   }
+});
+
+const docStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(process.cwd(), 'uploads', 'documents');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${uuidv4()}${ext}`);
+  }
+});
+const uploadDoc = multer({ storage: docStorage });
+
+app.post('/api/rooms/:id/upload-doc', uploadDoc.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file provided' });
+  const fileUrl = `/uploads/documents/${req.file.filename}`;
+  res.json({
+    success: true,
+    fileUrl,
+    fileName: req.file.originalname,
+    fileType: req.file.mimetype,
+  });
 });
 
 // Agora token (stub)

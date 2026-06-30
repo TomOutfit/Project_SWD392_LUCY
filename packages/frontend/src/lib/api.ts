@@ -70,6 +70,13 @@ export const roomsApi = {
   create: (data: any) => njsApi.post('/api/rooms', data),
   agoraToken: (channelName: string, uid: number) =>
     njsApi.get('/api/agora/token', { params: { channelName, uid } }),
+  uploadDoc: (roomId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return njsApi.post(`/api/rooms/${roomId}/upload-doc`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 export const podcastsApi = {

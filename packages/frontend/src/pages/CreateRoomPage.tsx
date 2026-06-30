@@ -12,7 +12,7 @@ import { LANG_FLAGS, LANG_NAMES, STAGE_NAMES } from '@/types/index';
 
 export default function CreateRoomPage() {
   const { user } = useAuthStore();
-  const { connectSocket, joinRoom, selectedMicrophoneId, setSelectedMicrophone } = useRoomStore();
+  const { connectSocket, joinRoom, selectedMicrophoneId, switchMicrophone } = useRoomStore();
   const navigate = useNavigate();
   const [levels, setLevels] = useState<Level[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,7 +33,7 @@ export default function CreateRoomPage() {
         const audioInputs = devices.filter(d => d.kind === 'audioinput');
         setMicrophones(audioInputs);
         if (audioInputs.length > 0 && !useRoomStore.getState().selectedMicrophoneId) {
-          useRoomStore.getState().setSelectedMicrophone(audioInputs[0].deviceId);
+          useRoomStore.getState().switchMicrophone(audioInputs[0].deviceId);
         }
       } catch (err) {
         console.error('Error fetching devices', err);
@@ -136,7 +136,7 @@ export default function CreateRoomPage() {
       navigate('/');
       return;
     }
-    connectSocket(user.id, user.displayName, user.personaId, user.role);
+    connectSocket(user.id, user.displayName, user.personaId, user.role, '');
     levelsApi.all().then(r => {
       setLevels(r.data);
       setLoading(false);
@@ -278,7 +278,7 @@ export default function CreateRoomPage() {
             <select
               className="w-full bg-midnight border border-ghost rounded-xl px-4 py-3 text-sm text-[#F0F4FF] outline-none focus:border-cyan transition-all"
               value={selectedMicrophoneId || ''}
-              onChange={(e) => setSelectedMicrophone(e.target.value)}
+              onChange={(e) => switchMicrophone(e.target.value)}
             >
               {microphones.length === 0 && <option value="">Default Microphone</option>}
               {microphones.map((mic, idx) => (

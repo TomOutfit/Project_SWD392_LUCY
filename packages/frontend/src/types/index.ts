@@ -44,6 +44,7 @@ export interface Room {
   participants?: Participant[];
   pinnedContent?: ContentPin | null;
   createdAt: string;
+  nextTransitionAt?: string;
 }
 
 export interface Participant {
@@ -56,6 +57,8 @@ export interface Participant {
   isSpeaking: boolean;
   handRaised: boolean;
   handRaisedAt?: string;
+  speakingDurationSec?: number;
+  speakGranted?: boolean;
 }
 
 export interface ContentPin {

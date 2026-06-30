@@ -4,11 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../db/index.js';
 import { rooms, podcasts } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
-import agora from 'agora-access-token';
-const { RtcTokenBuilder, RtcRole } = agora;
-
-const AGORA_APP_ID = process.env.AGORA_APP_ID as string | undefined;
-const AGORA_APP_CREDENTIAL = process.env.AGORA_APP_CREDENTIAL as string | undefined;
+import pkg from 'agora-token';
+const { RtcTokenBuilder, RtcRole } = pkg;
 
 export async function getRooms(req: Request, res: Response) {
   try {
@@ -47,25 +44,30 @@ export async function getAgoraToken(req: Request, res: Response) {
     const uid = parseInt((req.query.uid as string | undefined) || '0', 10) || 0;
     const expireSec = parseInt((req.query.expireSec as string | undefined) || '3600', 10) || 3600;
 
-    if (!AGORA_APP_ID || !AGORA_APP_CREDENTIAL) {
+    const appId = process.env.AGORA_APP_ID || 'c309f46a6f23498a8f8bec6dd3f17fb8';
+    const appCredential = process.env.AGORA_APP_CREDENTIAL || '6907e1d99eec490481997120e3d80639';
+
+    if (!appId || !appCredential) {
       return res.status(500).json({ error: 'Agora App ID / App Credential not configured on server' });
     }
 
-    const privilegeExpiredTs = Math.floor(Date.now() / 1000) + expireSec;
+    console.log('[AgoraToken] Generating token with App ID:', appId, 'channel:', channelName, 'uid:', uid);
+
     const token = RtcTokenBuilder.buildTokenWithUid(
-      AGORA_APP_ID,
-      AGORA_APP_CREDENTIAL,
+      appId,
+      appCredential,
       channelName,
       uid,
       RtcRole.PUBLISHER,
-      privilegeExpiredTs,
+      expireSec,
+      expireSec,
     );
 
     res.json({
       token,
       channelName,
       uid,
-      expiresAt: privilegeExpiredTs * 1000,
+      expiresAt: (Math.floor(Date.now() / 1000) + expireSec) * 1000,
     });
   } catch (err) {
     console.error('[AgoraToken] Failed to build token:', err);

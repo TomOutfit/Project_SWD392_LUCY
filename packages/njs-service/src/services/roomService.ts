@@ -29,10 +29,13 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     const existing = roomData.room.participants.find(p => p.oderId === user.id);
 
     if (!existing) {
+      const isHost = roomData.room.hostId === user.id;
       const participant: Participant = {
         oderId: user.id, oderName: user.name, oderPersonaId: user.personaId,
         oderRole: user.role, joinedAt: new Date().toISOString(),
-        isMuted: true, isSpeaking: false, handRaised: false,
+        isMuted: !isHost, isSpeaking: isHost, handRaised: false,
+        speakingDurationSec: 0,
+        speakGranted: isHost,
       };
       roomData.room.participants.push(participant);
       roomData.room.participantCount = roomData.room.participants.length;
@@ -91,7 +94,13 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     if (!roomData) return;
 
     const p = roomData.room.participants.find(p => p.oderId === socket.data.userId);
-    if (p) { p.isMuted = muted; }
+    if (p) {
+      const isHost = roomData.room.hostId === socket.data.userId;
+      if (isHost || p.speakGranted) {
+        p.isMuted = muted;
+        p.isSpeaking = !muted;
+      }
+    }
     io.to(roomId).emit('room-updated', { room: roomData.room });
   });
 
@@ -105,6 +114,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     p.isMuted = false;
     p.isSpeaking = true;
     p.handRaised = false;
+    p.speakGranted = true;
     roomData.handQueue = roomData.handQueue.filter(q => q.oderId !== participantId);
 
     io.to(roomId).emit('speak-granted', { roomId, oderId: participantId });
@@ -117,7 +127,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     if (!roomData || roomData.room.hostId !== socket.data.userId) return;
 
     const p = roomData.room.participants.find(p => p.oderId === participantId);
-    if (p) { p.isMuted = true; p.isSpeaking = false; }
+    if (p) { p.isMuted = true; p.isSpeaking = false; p.speakGranted = false; }
 
     io.to(roomId).emit('speak-revoked', { roomId, oderId: participantId });
     io.to(roomId).emit('room-updated', { room: roomData.room });
@@ -157,8 +167,8 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     const recording = roomData.recording;
     roomData.recording = undefined;
 
-    io.to(roomId).emit('recording-stopped', { roomId, podcastId });
-
+    // Insert podcast record BEFORE emitting recording-stopped so the file upload
+    // can UPDATE a record that is guaranteed to exist on the server.
     try {
       await db.insert(podcasts).values({
         id: podcastId,
@@ -176,7 +186,11 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       });
     } catch (err) {
       console.error('[roomService] Failed to persist podcast metadata:', err);
+      return; // Don't emit if DB insert failed
     }
+
+    // Now the podcast record exists — safe to tell clients to upload.
+    io.to(roomId).emit('recording-stopped', { roomId, podcastId });
   });
 
   socket.on('close-room', async ({ roomId }) => {
@@ -245,6 +259,7 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
     pinnedContent: null,
     participantCount: 0,
     createdAt: new Date().toISOString(),
+    nextTransitionAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   };
 
   const subject = new RoomStageSubject(id);
@@ -311,3 +326,19 @@ export function getActiveRooms(): Room[] {
 
 let ioInstance: Server;
 export function setIO(io: Server) { ioInstance = io; }
+
+// Background timer to increment speaking time for active speakers
+setInterval(() => {
+  for (const [, roomData] of activeRooms.entries()) {
+    let updated = false;
+    for (const p of roomData.room.participants) {
+      if (!p.isMuted && p.isSpeaking) {
+        p.speakingDurationSec = (p.speakingDurationSec || 0) + 1;
+        updated = true;
+      }
+    }
+    if (updated && ioInstance) {
+      ioInstance.to(roomData.room.id).emit('room-updated', { room: roomData.room });
+    }
+  }
+}, 1000);

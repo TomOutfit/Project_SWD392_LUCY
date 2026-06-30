@@ -1,800 +1,863 @@
-// src/stores/roomStore.ts
-/// <reference types="vite/client" />
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import AgoraRTC from 'agora-rtc-sdk-ng';
-import type { Room, Participant, ContentPin } from '@/types/index';
-import toast from 'react-hot-toast';
+import AgoraRTC, { IAgoraRTCClient, ILocalAudioTrack } from 'agora-rtc-sdk-ng';
+import { api, roomsApi } from '@/lib/api';
+import { Room, Participant, ContentPin, LevelContent } from '@/types/index';
 
-function getAgoraClient(): any {
-  if (!(globalThis as any).__lucyAgoraClient) {
-    (globalThis as any).__lucyAgoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-  }
-  return (globalThis as any).__lucyAgoraClient;
+// ─── Socket Server Events ─────────────────────────────────────────────────────
+interface ServerEvents {
+  'room-joined': { room: Room; userId: number };
+  'room-left': { roomId: string; oderId: number };
+  'room-updated': { room: Room };
+  'participant-joined': { roomId: string; participant: Participant };
+  'participant-left': { roomId: string; oderId: number };
+  'hand-raised': { roomId: string; oderId: number };
+  'hand-lowered': { roomId: string; oderId: number };
+  'hand-queue-updated': { roomId: string; queue: Participant[] };
+  'speak-granted': { roomId: string; oderId: number };
+  'speak-revoked': { roomId: string; oderId: number };
+  'stage-changed': { roomId: string; newSubLevel: number; levelName: string };
+  'gift-received': {
+    senderName: string;
+    senderPersonaId: number;
+    giftType: string;
+    amount: number;
+    recipientName: string;
+    id: string;
+  };
+  'room-closed': { roomId: string };
+  'pinned-content-updated': { roomId: string; pin: ContentPin | null };
+  'recording-started': { roomId: string; recordingId: string };
+  'recording-stopped': { roomId: string; podcastId: string };
+  'ai-recommendation-updated': {
+    roomId: string;
+    recommendation: LevelContent & { levelName: string; levelId: number };
+  };
+  'error': { message: string };
 }
 
-interface LucyMixer {
-  context: AudioContext | null;
-  dest: MediaStreamAudioDestinationNode | null;
-  recorder: MediaRecorder | null;
-  chunks: BlobPart[];
+export interface GiftEvent {
+  id: string;
+  senderName: string;
+  senderPersonaId: number;
+  giftType: string;
+  amount: number;
+  recipientName: string;
 }
-(globalThis as any).__lucyMixer = { context: null, dest: null, recorder: null, chunks: [] } as LucyMixer;
 
-interface AudioMonitor {
-  context: AudioContext | null;
-  gainNode: GainNode | null;
-  streamDest: MediaStreamAudioDestinationNode | null;
-  sourceNode: MediaStreamAudioSourceNode | null;
-  isConnected: boolean;
-}
-(globalThis as any).__lucyAudioMonitor = { context: null, gainNode: null, streamDest: null, sourceNode: null, isConnected: false } as AudioMonitor;
-
+// ─── State Shape ──────────────────────────────────────────────────────────────
 interface RoomState {
   socket: Socket | null;
+  isConnected: boolean;
+  reconnectAttempts: number;
+  maxReconnectAttempts: number;
+
+  agoraClient: IAgoraRTCClient | null;
+  localAudioTrack: ILocalAudioTrack | null;
+  agoraReady: boolean;
+  agoraJoined: boolean;
+  agoraJoining: boolean;
+  agoraFailed: boolean;
+
+  isMuted: boolean;
+  isSpeaking: boolean;
+  isSelfMonitoring: boolean;
+  selectedMicrophoneId: string | null;
+  audioContext: AudioContext | null;
+  analyserNode: AnalyserNode | null;
+  monitoringGain: GainNode | null;
+
   currentRoom: Room | null;
   participants: Participant[];
   handQueue: Participant[];
-  isConnected: boolean;
-  isMuted: boolean;
-  isSpeaking: boolean;
-  handRaised: boolean;
   pinnedContent: ContentPin | null;
-  isRecording: boolean;
-  recordingId: string | null;
-  recordingTime: number;
-  recordingTimerInterval: number | null;
+  recommendation: (LevelContent & { levelName: string; levelId: number }) | null;
   joiningRoomId: string | null;
+
+  isRecording: boolean;
+  recordingTime: number;
+  mediaRecorder: MediaRecorder | null;
+  recordedChunks: Blob[];
+  recordingInterval: ReturnType<typeof setInterval> | null;
+  currentPodcastId: string | null;
+  isUploading: boolean;
+
+  giftEvents: GiftEvent[];
+
   latencyMs: number | null;
-  latencyTimer: number | null;
-  agoraJoining: boolean;
-  agoraJoined: boolean;
-  giftEvents: Array<{ id: string; senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string }>;
-  recommendation: {
-    vocabulary: string[];
-    conversationPrompts: string[];
-    grammarTips: string[];
-    aiSuggestedQuestions: string[];
-    levelName: string;
-    levelId: number;
-  } | null;
-  selectedMicrophoneId: string | null;
-  agoraReady: boolean;
-  isSelfMonitoring: boolean;
-
-  connectSocket: (userId: number, userName: string, personaId: number, role: string, pendingRoomId?: string) => void;
-
-  disconnectSocket: () => void;
-  joinRoom: (roomId: string) => void;
-  leaveRoom: () => void;
-  handRaise: () => void;
-  handLower: () => void;
-  grantSpeak: (participantId: number) => void;
-  revokeSpeak: (participantId: number) => void;
-  toggleMute: () => void;
-  pinContent: (title: string, url: string, type: 'vocabulary' | 'grammar' | 'conversation' | 'pdf') => void;
-  startRecording: () => void;
-  stopRecording: () => void;
-  closeRoom: () => void;
-  clearGiftEvents: () => void;
-  forceStageTransition: () => void;
-  startLatencyProbe: () => void;
-  stopLatencyProbe: () => void;
-  setSelectedMicrophone: (id: string) => void;
-  switchMicrophone: (id: string) => Promise<void>;
-  joinAgoraChannel: (userId: number, roomId: string) => Promise<void>;
-  leaveAgoraChannel: () => Promise<void>;
-  getLocalVolumeLevel: () => number;
-  getLocalMediaStreamTrack: () => MediaStreamTrack | null;
-  toggleSelfMonitoring: () => void;
+  pingInterval: ReturnType<typeof setInterval> | null;
 }
 
-export const useRoomStore = create<RoomState>((set, get) => ({
+// ─── Actions ──────────────────────────────────────────────────────────────────
+interface RoomActions {
+  connectSocket: (
+    userId: number,
+    userName: string,
+    userPersonaId: number,
+    userRole: string,
+    roomId?: string,
+  ) => void;
+  disconnectSocket: () => void;
+  joinRoom: (roomId: string) => Promise<void>;
+  leaveRoom: () => void;
+  closeRoom: () => void;
+  handRaise: () => void;
+  handLower: () => void;
+  toggleHand: () => void;
+  toggleMute: () => void;
+  grantSpeak: (participantId: number) => void;
+  revokeSpeak: (participantId: number) => void;
+  forceStageTransition: () => void;
+  pinContent: (title: string, url: string, type: ContentPin['type']) => void;
+  startRecording: () => void;
+  stopRecording: () => void;
+  uploadRecording: (podcastId: string, chunks: Blob[]) => Promise<void>;
+  joinAgoraChannel: (userId: number, roomId: string) => Promise<void>;
+  leaveAgoraChannel: () => Promise<void>;
+  switchMicrophone: (deviceId: string) => Promise<void>;
+  toggleSelfMonitoring: () => void;
+  getLocalVolumeLevel: () => number;
+  measureLatency: () => void;
+}
+
+type RoomStore = RoomState & RoomActions;
+
+const initialState: RoomState = {
   socket: null,
+  isConnected: false,
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 5,
+
+  agoraClient: null,
+  localAudioTrack: null,
+  agoraReady: false,
+  agoraJoined: false,
+  agoraJoining: false,
+  agoraFailed: false,
+
+  isMuted: true,
+  isSpeaking: false,
+  isSelfMonitoring: false,
+  selectedMicrophoneId: null,
+  audioContext: null,
+  analyserNode: null,
+  monitoringGain: null,
+
   currentRoom: null,
   participants: [],
   handQueue: [],
-  isConnected: false,
-  isMuted: true,
-  isSpeaking: false,
-  handRaised: false,
   pinnedContent: null,
-  isRecording: false,
-  recordingId: null,
-  recordingTime: 0,
-  recordingTimerInterval: null,
-  joiningRoomId: null,
-  latencyMs: null,
-  latencyTimer: null,
-  agoraJoining: false,
-  agoraJoined: false,
-  giftEvents: [],
   recommendation: null,
-  selectedMicrophoneId: null,
-  agoraReady: false,
-  isSelfMonitoring: false,
+  joiningRoomId: null,
 
-  connectSocket: (userId, userName, personaId, role, pendingRoomId) => {
-    const existingSocket = get().socket;
-    if (existingSocket?.connected) {
-      if (pendingRoomId) {
-        get().joinRoom(pendingRoomId);
-      }
-      return;
-    }
-    if (pendingRoomId) set({ joiningRoomId: pendingRoomId });
+  isRecording: false,
+  recordingTime: 0,
+  mediaRecorder: null,
+  recordedChunks: [],
+  recordingInterval: null,
+  currentPodcastId: null,
+  isUploading: false,
 
-    const njsUrl = import.meta.env.VITE_NJS_URL || 'http://localhost:3001';
+  giftEvents: [],
+
+  latencyMs: null,
+  pingInterval: null,
+};
+
+// ─── Store ───────────────────────────────────────────────────────────────────
+export const useRoomStore = create<RoomStore>((set, get) => ({
+  ...initialState,
+
+  connectSocket(userId, userName, userPersonaId, userRole, roomId?) {
+    const existing = get().socket;
+    if (existing?.connected) return;
+
+    const njsUrl = (import.meta.env.VITE_NJS_URL as string | undefined) || 'http://localhost:3001';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const socket = io(njsUrl, {
-      auth: { userId, userName, personaId, role },
-      transports: ['websocket'],
+      path: '/socket.io',
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      query: { userId: String(userId) },
+      auth: { userId, userName, userPersonaId, userRole },
+    } as any);
+
+    // Use a typed emit wrapper to satisfy socket.io-client's strict generics
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const emit = <Ev extends string>(ev: Ev, ...args: any[]) => socket.emit(ev, ...args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const on = (ev: string, handler: (...args: any[]) => void) =>
+      socket.on(ev, handler);
+
+    on('connect', () => {
+      set({ isConnected: true, reconnectAttempts: 0 });
     });
 
-    socket.on('connect', () => {
-      set({ socket, isConnected: true });
-      const roomToJoin = get().joiningRoomId;
-      if (roomToJoin) {
-        set({ joiningRoomId: null });
-        socket.emit('join-room', { roomId: roomToJoin, user: socket.auth });
-      }
-      // We no longer use socket ping for latency. We will use Agora's getRTCStats().RTT for true audio latency.
-      set({ isConnected: true });
-    });
-    socket.on('disconnect', () => {
-      set({ isConnected: false, latencyMs: null });
+    on('disconnect', () => {
+      set({ isConnected: false });
     });
 
-    socket.on('room-joined', ({ room }: { room: Room }) => {
-      set({ currentRoom: room, participants: room.participants || [], pinnedContent: room.pinnedContent, joiningRoomId: null });
+    on('room-joined', (data: { room: Room }) => {
+      const room = data.room;
+      set({
+        currentRoom: room,
+        participants: room.participants ?? [],
+        pinnedContent: room.pinnedContent ?? null,
+        joiningRoomId: null,
+      });
     });
 
-    socket.on('participant-joined', ({ participant }: { participant: Participant }) => {
-      set((s) => ({ participants: [...s.participants, participant] }));
-    });
-
-    socket.on('participant-left', ({ oderId }: { oderId: number }) => {
-      set((s) => ({ participants: s.participants.filter((p) => p.oderId !== oderId) }));
-    });
-
-    socket.on('hand-queue-updated', ({ queue }: { queue: Participant[] }) => {
-      set({ handQueue: queue });
-    });
-
-    socket.on('room-updated', ({ room }: { room: Room }) => {
-      set((s) => ({ currentRoom: room, participants: room.participants || s.participants }));
-    });
-
-    socket.on('speak-granted', ({ oderId }: { oderId: number }) => {
-      const currentUserId = (socket.auth as any)?.userId;
-      if (oderId === currentUserId) {
-        // This is the current user - unmute them
-        try {
-          const track = (getAgoraClient() as any).__localAudioTrack;
-          if (track) track.setEnabled(true);
-        } catch (err) {
-          console.error('[Agora] speak-granted: failed to enable track:', err);
-        }
-      }
+    on('room-left', (data: { oderId: number }) => {
+      const { oderId } = data;
       set((s) => ({
-        isMuted: oderId === currentUserId ? false : s.isMuted,
-        participants: s.participants.map((p) => p.oderId === oderId ? { ...p, isMuted: false, isSpeaking: true } : p),
+        participants: s.participants.filter((p) => p.oderId !== oderId),
+        handQueue: s.handQueue.filter((p) => p.oderId !== oderId),
       }));
     });
 
-    socket.on('speak-revoked', ({ oderId }: { oderId: number }) => {
-      const currentUserId = (socket.auth as any)?.userId;
-      if (oderId === currentUserId) {
-        // This is the current user - mute them
-        try {
-          const track = (getAgoraClient() as any).__localAudioTrack;
-          if (track) track.setEnabled(false);
-        } catch (err) {
-          console.error('[Agora] speak-revoked: failed to disable track:', err);
-        }
-      }
+    on('room-updated', (data: { room: Room }) => {
+      set({
+        currentRoom: data.room,
+        participants: data.room.participants ?? [],
+      });
+    });
+
+    on('participant-joined', (data: { participant: Participant }) => {
+      const { participant } = data;
+      set((s) => {
+        if (s.participants.find((p) => p.oderId === participant.oderId)) return {};
+        return { participants: [...s.participants, participant] };
+      });
+    });
+
+    on('participant-left', (data: { oderId: number }) => {
+      const { oderId } = data;
       set((s) => ({
-        isMuted: oderId === currentUserId ? true : s.isMuted,
-        participants: s.participants.map((p) => p.oderId === oderId ? { ...p, isMuted: true, isSpeaking: false } : p),
+        participants: s.participants.filter((p) => p.oderId !== oderId),
+        handQueue: s.handQueue.filter((p) => p.oderId !== oderId),
       }));
     });
 
-    socket.on('stage-changed', ({ newSubLevel }: { newSubLevel: number }) => {
+    on('hand-raised', (data: { oderId: number }) => {
+      const { oderId } = data;
       set((s) => ({
-        currentRoom: s.currentRoom ? { ...s.currentRoom, currentSubLevel: newSubLevel } : null,
+        participants: s.participants.map((p) =>
+          p.oderId === oderId ? { ...p, handRaised: true } : p,
+        ),
       }));
     });
 
-    socket.on('gift-received', (event: { senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string }) => {
-      const id = crypto.randomUUID();
-      set((s) => ({ giftEvents: [...s.giftEvents, { ...event, id }] }));
+    on('hand-lowered', (data: { oderId: number }) => {
+      const { oderId } = data;
+      set((s) => ({
+        participants: s.participants.map((p) =>
+          p.oderId === oderId ? { ...p, handRaised: false } : p,
+        ),
+        handQueue: s.handQueue.filter((p) => p.oderId !== oderId),
+      }));
+    });
+
+    on('hand-queue-updated', (data: { queue: Participant[] }) => {
+      set({ handQueue: data.queue });
+    });
+
+    on('speak-granted', (data: { oderId: number }) => {
+      const { oderId } = data;
+      set((s) => ({
+        participants: s.participants.map((p) =>
+          p.oderId === oderId
+            ? { ...p, isMuted: false, isSpeaking: true, speakGranted: true, handRaised: false }
+            : p,
+        ),
+      }));
+    });
+
+    on('speak-revoked', (data: { oderId: number }) => {
+      const { oderId } = data;
+      set((s) => ({
+        participants: s.participants.map((p) =>
+          p.oderId === oderId
+            ? { ...p, isMuted: true, isSpeaking: false, speakGranted: false }
+            : p,
+        ),
+      }));
+    });
+
+    on('stage-changed', (data: { newSubLevel: number; levelName: string }) => {
+      set((s) => ({
+        currentRoom: s.currentRoom
+          ? { ...s.currentRoom, currentSubLevel: data.newSubLevel, levelName: data.levelName, state: 'Active' }
+          : null,
+      }));
+    });
+
+    on('gift-received', (evt: ServerEvents['gift-received']) => {
+      set((s) => ({ giftEvents: [...s.giftEvents, evt] }));
       setTimeout(() => {
-        set((s) => ({ giftEvents: s.giftEvents.filter((e) => e.id !== id) }));
-      }, 4000);
+        set((s) => ({ giftEvents: s.giftEvents.filter((e) => e.id !== evt.id) }));
+      }, 5000);
     });
 
-    socket.on('pinned-content-updated', ({ pin }: { pin: ContentPin | null }) => {
-      set({ pinnedContent: pin });
+    on('room-closed', () => {
+      get().leaveRoom();
     });
 
-    socket.on('recording-started', ({ recordingId }: { recordingId: string }) => {
-      const interval = window.setInterval(() => {
-        set((state) => ({ recordingTime: state.recordingTime + 1 }));
-      }, 1000);
-      set({ isRecording: true, recordingId, recordingTime: 0, recordingTimerInterval: interval as any });
+    on('pinned-content-updated', (data: { pin: ContentPin | null }) => {
+      set({ pinnedContent: data.pin });
     });
 
-    socket.on('recording-stopped', ({ podcastId }: { podcastId: string }) => {
-      const { recordingTimerInterval } = get();
-      if (recordingTimerInterval) window.clearInterval(recordingTimerInterval);
-      set({ isRecording: false, recordingId: null, recordingTimerInterval: null });
+    on('recording-started', () => {
+      get().startRecording();
+    });
 
-      const mixer = (globalThis as any).__lucyMixer as LucyMixer;
-      if (mixer.recorder && mixer.recorder.state !== 'inactive') {
-        mixer.recorder.onstop = async () => {
-          const blob = new Blob(mixer.chunks, { type: 'audio/webm' });
-          mixer.chunks = [];
+    on('recording-stopped', (data: { roomId: string; podcastId: string }) => {
+      set({ currentPodcastId: data.podcastId });
+      const { mediaRecorder, recordingInterval } = get();
 
-          const formData = new FormData();
-          formData.append('audio', blob, `podcast-${podcastId}.webm`);
-
-          try {
-            const njsUrl = import.meta.env.VITE_NJS_URL || 'http://localhost:3001';
-            const res = await fetch(`${njsUrl}/api/podcasts/${podcastId}/upload`, {
-              method: 'POST',
-              body: formData,
-            });
-            const data = await res.json();
-            if (data.success) {
-              toast.success('Podcast saved successfully!');
-            } else {
-              toast.error('Failed to upload podcast');
-            }
-          } catch (err) {
-            console.error('Failed to upload podcast', err);
-            toast.error('Failed to upload podcast');
-          }
-
-          // cleanup
-          if (mixer.context) {
-            mixer.context.close();
-            mixer.context = null;
-            mixer.dest = null;
-          }
-        };
-        mixer.recorder.stop();
+      if (!mediaRecorder) {
+        return;
       }
-    });
 
-    socket.on('room-closed', async () => {
-      await get().leaveAgoraChannel();
-      set({ currentRoom: null, participants: [], handQueue: [], recommendation: null });
-    });
-
-    socket.on('ai-recommendation-updated', ({ recommendation }) => {
-      set({ recommendation });
-    });
-
-    socket.on('error', ({ message }: { message: string }) => {
-      console.error('[Socket error]', message);
-      toast.error(message);
-      if (message === 'Room not found') {
-        set({ joiningRoomId: null, currentRoom: null });
-        window.location.href = '/browse';
+      if (mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
       }
+      if (recordingInterval) clearInterval(recordingInterval);
+
+      set({
+        isRecording: false,
+        recordingTime: 0,
+        mediaRecorder: null,
+        recordingInterval: null,
+      });
     });
+
+    on('ai-recommendation-updated', (data: {
+      recommendation: LevelContent & { levelName: string; levelId: number };
+    }) => {
+      set({ recommendation: data.recommendation });
+    });
+
+    on('error', (data: { message: string }) => {
+      console.error('[roomStore] Socket error:', data.message);
+    });
+
+    set({ socket, isConnected: true });
+    get().measureLatency();
+
+    if (roomId) {
+      emit('join-room', {
+        roomId,
+        user: { id: userId, name: userName, personaId: userPersonaId, role: userRole },
+      });
+    }
   },
 
-  disconnectSocket: async () => {
-    const socket = get().socket;
-    if (socket) socket.disconnect();
-    get().stopLatencyProbe();
-    await get().leaveAgoraChannel();
-    set({ socket: null, isConnected: false, currentRoom: null, participants: [], handQueue: [], recommendation: null, joiningRoomId: null, latencyMs: null });
+  disconnectSocket() {
+    const { socket, pingInterval } = get();
+    if (pingInterval) clearInterval(pingInterval);
+    socket?.disconnect();
+    set({ socket: null, isConnected: false, pingInterval: null });
   },
 
-  joinRoom: (roomId) => {
-    const { socket, joiningRoomId } = get();
-    if (!socket) {
-      set({ joiningRoomId: roomId });
-      return;
-    }
-    if (joiningRoomId === roomId) return;
-    if (!socket.connected) {
-      set({ joiningRoomId: roomId });
-      return;
-    }
+  // ── Room ─────────────────────────────────────────────────────────────────────
+
+  async joinRoom(roomId) {
+    const { socket, isConnected, currentRoom, joiningRoomId } = get();
+    if (!socket || !isConnected) return;
+    if (currentRoom?.id === roomId || joiningRoomId === roomId) return;
+
     set({ joiningRoomId: roomId });
-    socket.emit('join-room', { roomId, user: socket.auth });
+
+    const user = JSON.parse(localStorage.getItem('lucy_user') || '{}');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('join-room', {
+      roomId,
+      user: {
+        id: user.id,
+        name: user.displayName,
+        personaId: user.personaId,
+        role: user.role,
+      },
+    });
   },
 
-  leaveRoom: async () => {
+  leaveRoom() {
+    const { socket, currentRoom, agoraJoined, recordingInterval } = get();
+
+    if (recordingInterval) clearInterval(recordingInterval);
+
+    if (currentRoom?.id && socket?.connected) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (socket as any).emit('leave-room', { roomId: currentRoom.id });
+    }
+
+    if (agoraJoined) {
+      get().leaveAgoraChannel();
+    }
+
+    set({
+      ...initialState,
+      reconnectAttempts: 0,
+    });
+  },
+
+  closeRoom() {
     const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('leave-room', { roomId: currentRoom.id });
-    }
-    await get().leaveAgoraChannel();
-    set({ currentRoom: null, participants: [], handQueue: [], isMuted: true, isSpeaking: false, handRaised: false, recommendation: null, joiningRoomId: null });
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('close-room', { roomId: currentRoom.id });
+    get().leaveRoom();
   },
 
-  handRaise: () => {
+  // ── Speaking ─────────────────────────────────────────────────────────────────
+
+  handRaise() {
     const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('hand-raise', { roomId: currentRoom.id });
-      set({ handRaised: true });
-    }
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('hand-raise', { roomId: currentRoom.id });
   },
 
-  handLower: () => {
+  handLower() {
     const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('hand-lower', { roomId: currentRoom.id });
-      set({ handRaised: false });
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('hand-lower', { roomId: currentRoom.id });
+  },
+
+  toggleHand() {
+    const { participants, socket, currentRoom } = get();
+    const userId = JSON.parse(localStorage.getItem('lucy_user') || '{}').id;
+    const me = participants.find(p => p.oderId === userId);
+    if (!socket || !currentRoom) return;
+
+    if (me?.handRaised) {
+      (socket as any).emit('hand-lower', { roomId: currentRoom.id });
+    } else {
+      (socket as any).emit('hand-raise', { roomId: currentRoom.id });
     }
   },
 
-  grantSpeak: (participantId) => {
-    const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('grant-speak', { roomId: currentRoom.id, participantId });
-    }
-  },
+  toggleMute() {
+    const { socket, currentRoom, isMuted, localAudioTrack, audioContext } = get();
+    // eslint-disable-next-line no-console
+    console.log('[toggleMute] called — isMuted:', isMuted, 'audioContext:', audioContext?.state, 'localAudioTrack:', !!localAudioTrack);
+    if (!socket || !currentRoom) return;
 
-  revokeSpeak: (participantId) => {
-    const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('revoke-speak', { roomId: currentRoom.id, participantId });
-    }
-  },
+    const newMuted = !isMuted;
 
-  toggleMute: () => {
-    const { socket, currentRoom, isMuted, agoraJoined, agoraReady, isSelfMonitoring } = get();
-    if (socket && currentRoom) {
-      const newMutedState = !isMuted;
-      socket.emit('toggle-mute', { roomId: currentRoom.id, muted: newMutedState });
-      set({ isMuted: newMutedState });
-
-      if (isSelfMonitoring && newMutedState) {
-        const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
-        if (monitor.sourceNode) {
-          monitor.sourceNode.disconnect();
-        }
-        if (monitor.gainNode) {
-          monitor.gainNode.disconnect();
-        }
-        if (monitor.context && monitor.context.state !== 'closed') {
-          monitor.context.close();
-        }
-        monitor.context = null;
-        monitor.gainNode = null;
-        monitor.sourceNode = null;
-        monitor.streamDest = null;
-        monitor.isConnected = false;
-        set({ isSelfMonitoring: false });
-        console.log('[Audio Monitor] Auto-disabled due to mute');
-      }
-
-      if (agoraJoined && agoraReady) {
-        try {
-          const track = (getAgoraClient() as any).__localAudioTrack;
-          if (track) {
-            track.setEnabled(!newMutedState);
-            console.log('[Agora] Mute toggled:', newMutedState ? 'muted' : 'unmuted');
-          } else {
-            console.warn('[Agora] Toggle mute called but no local audio track exists');
-          }
-        } catch (err) {
-          console.error('[Agora] Failed to toggle mute:', err);
-        }
-      } else {
-        console.warn('[Agora] Toggle mute called but Agora not joined yet');
-      }
-    }
-  },
-
-  pinContent: (title, url, type) => {
-    const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('pin-content', { roomId: currentRoom.id, content: { title, url, type } });
-    }
-  },
-
-  startRecording: () => {
-    const { socket, currentRoom, agoraJoined } = get();
-    if (!socket || !currentRoom || !agoraJoined) return;
-
-    const mixer = (globalThis as any).__lucyMixer as LucyMixer;
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    mixer.context = new AudioCtx();
-    mixer.dest = mixer.context.createMediaStreamDestination();
-
-    const client = getAgoraClient();
-
-    // Add local track
-    const localTrack = (client as any).__localAudioTrack;
-    if (localTrack) {
-      const stream = new MediaStream([localTrack.getMediaStreamTrack()]);
-      const source = mixer.context.createMediaStreamSource(stream);
-      source.connect(mixer.dest);
-    }
-
-    // Add existing remote tracks
-    if (client.remoteUsers) {
-      client.remoteUsers.forEach((user: any) => {
-        if (user.audioTrack) {
-          const stream = new MediaStream([user.audioTrack.getMediaStreamTrack()]);
-          const source = mixer.context!.createMediaStreamSource(stream);
-          source.connect(mixer.dest!);
-        }
+    if (localAudioTrack) {
+      localAudioTrack.setEnabled(!newMuted).catch((err) => {
+        console.error('[roomStore] Failed to set local audio track enabled:', err);
       });
     }
 
-    mixer.chunks = [];
-    mixer.recorder = new MediaRecorder(mixer.dest.stream, { mimeType: 'audio/webm' });
-    mixer.recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) mixer.chunks.push(e.data);
-    };
-    mixer.recorder.start();
+    // Resume AudioContext so the analyser reads real mic data while unmuted.
+    // The browser may have suspended it due to autoplay policy (especially after mute).
+    if (!newMuted && audioContext && audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
 
-    socket.emit('start-recording', { roomId: currentRoom.id });
+    set({ isMuted: newMuted, isSpeaking: !newMuted });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('toggle-mute', { roomId: currentRoom.id, muted: newMuted });
   },
 
-  stopRecording: () => {
+  grantSpeak(participantId) {
     const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('stop-recording', { roomId: currentRoom.id });
-    }
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('grant-speak', { roomId: currentRoom.id, participantId });
   },
 
-  closeRoom: () => {
+  revokeSpeak(participantId) {
     const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('close-room', { roomId: currentRoom.id });
-    }
-    set({ currentRoom: null, participants: [], handQueue: [], recommendation: null, joiningRoomId: null });
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('revoke-speak', { roomId: currentRoom.id, participantId });
   },
 
-  forceStageTransition: () => {
+  forceStageTransition() {
     const { socket, currentRoom } = get();
-    if (socket && currentRoom) {
-      socket.emit('force-stage-transition', { roomId: currentRoom.id });
-    }
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('force-stage-transition', { roomId: currentRoom.id });
   },
 
-  clearGiftEvents: () => set({ giftEvents: [] }),
+  // ── Content ──────────────────────────────────────────────────────────────────
 
-  startLatencyProbe: () => {
-    const s = get().socket;
-    if (!s?.connected) return;
-    const timer = window.setInterval(() => {
-      try {
-        const start = Date.now();
-        s.emit('ping', () => {
-          set({ latencyMs: Date.now() - start });
-        });
-      } catch { /* noop */ }
-    }, 2000);
-    set({ latencyTimer: timer, latencyMs: null });
+  pinContent(title, url, type) {
+    const { socket, currentRoom } = get();
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('pin-content', {
+      roomId: currentRoom.id,
+      content: { title, url, type, pinnedBy: 0 },
+    });
   },
 
-  stopLatencyProbe: () => {
-    const t = get().latencyTimer;
-    if (t) window.clearInterval(t);
-    set({ latencyTimer: null, latencyMs: null });
-  },
+  // ── Recording ────────────────────────────────────────────────────────────────
 
-  setSelectedMicrophone: (id: string) => set({ selectedMicrophoneId: id }),
-
-  switchMicrophone: async (id: string) => {
-    set({ selectedMicrophoneId: id });
-
-    const wasMonitoring = get().isSelfMonitoring;
-    const { isMuted } = get();
-
-    if (wasMonitoring) {
-      const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
-      if (monitor.isConnected) {
-        if (monitor.sourceNode) monitor.sourceNode.disconnect();
-        if (monitor.gainNode) monitor.gainNode.disconnect();
-        if (monitor.context && monitor.context.state !== 'closed') {
-          monitor.context.close();
-        }
-        monitor.context = null;
-        monitor.gainNode = null;
-        monitor.sourceNode = null;
-        monitor.streamDest = null;
-        monitor.isConnected = false;
-        set({ isSelfMonitoring: false });
-      }
-    }
-
-    try {
-      const client = getAgoraClient();
-      const existingTrack = (client as any).__localAudioTrack;
-
-      if (existingTrack) {
-        try {
-          await client.unpublish(existingTrack);
-          existingTrack.close();
-        } catch { }
-        delete (client as any).__localAudioTrack;
-      }
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: id ? { deviceId: { exact: id } } : true
-        });
-        stream.getTracks().forEach(track => track.stop());
-        console.log('[Agora] Microphone permission granted for device:', id || 'default');
-      } catch (permErr) {
-        console.error('[Agora] Microphone permission denied:', permErr);
-        toast.error('Microphone permission denied. Please allow microphone access.');
-        return;
-      }
-
-      const newTrack = await AgoraRTC.createMicrophoneAudioTrack(
-        id ? { microphoneId: id } : undefined
-      );
-
-      newTrack.setEnabled(!isMuted);
-      await client.publish(newTrack);
-      (client as any).__localAudioTrack = newTrack;
-
-      if (wasMonitoring && !isMuted) {
-        setTimeout(() => {
-          get().toggleSelfMonitoring();
-        }, 100);
-      }
-
-      console.log('[Agora] Switched to microphone:', id || 'default');
-    } catch (err) {
-      console.error('[Agora] Failed to switch microphone:', err);
-      toast.error('Failed to switch microphone');
-    }
-  },
-
-  getLocalVolumeLevel: () => {
-    try {
-      const client = getAgoraClient();
-      const track = (client as any).__localAudioTrack;
-      if (track) return track.getVolumeLevel() * 100;
-    } catch {
-      // noop
-    }
-    return 0;
-  },
-
-  getLocalMediaStreamTrack: () => {
-    try {
-      const client = getAgoraClient();
-      const track = (client as any).__localAudioTrack;
-      if (track && typeof track.getMediaStreamTrack === 'function') {
-        return track.getMediaStreamTrack();
-      }
-    } catch {
-      // noop
-    }
-    return null;
-  },
-
-  toggleSelfMonitoring: () => {
-    const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
-    const { isMuted } = get();
-
-    if (isMuted) {
-      toast.error('Cannot enable monitoring while muted. Please unmute first.');
+  async uploadRecording(podcastId: string, chunks: Blob[]) {
+    const { currentRoom } = get();
+    if (!podcastId || !currentRoom) {
+      console.warn('[roomStore] uploadRecording: missing podcastId or room');
       return;
     }
 
+    set({ isUploading: true });
     try {
-      if (!monitor.isConnected) {
-        const client = getAgoraClient();
-        const localTrack = (client as any).__localAudioTrack;
-        if (!localTrack) {
-          console.warn('[Audio Monitor] No local audio track available');
-          toast.error('Microphone not ready. Please try again.');
-          return;
-        }
-
-        const mediaStreamTrack = localTrack.getMediaStreamTrack();
-        if (!mediaStreamTrack) {
-          console.warn('[Audio Monitor] No media stream track available');
-          return;
-        }
-
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        monitor.context = new AudioCtx();
-        monitor.gainNode = monitor.context.createGain();
-        monitor.gainNode.gain.value = 0.3;
-        monitor.streamDest = monitor.context.createMediaStreamDestination();
-        monitor.sourceNode = monitor.context.createMediaStreamSource(mediaStreamTrack);
-
-        monitor.sourceNode.connect(monitor.gainNode);
-        monitor.gainNode.connect(monitor.streamDest);
-        monitor.gainNode.connect(monitor.context.destination);
-
-        monitor.isConnected = true;
-        console.log('[Audio Monitor] Monitoring enabled - you will hear your own voice');
-        toast.success('Self-monitoring enabled');
-        set({ isSelfMonitoring: true });
-      } else {
-        if (monitor.sourceNode) {
-          monitor.sourceNode.disconnect();
-        }
-        if (monitor.gainNode) {
-          monitor.gainNode.disconnect();
-        }
-        if (monitor.context && monitor.context.state !== 'closed') {
-          monitor.context.close();
-        }
-        monitor.context = null;
-        monitor.gainNode = null;
-        monitor.sourceNode = null;
-        monitor.streamDest = null;
-        monitor.isConnected = false;
-        console.log('[Audio Monitor] Monitoring disabled');
-        toast.success('Self-monitoring disabled');
-        set({ isSelfMonitoring: false });
-      }
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const formData = new FormData();
+      formData.append('audio', blob, 'recording.webm');
+      await api.post(`/podcasts/${podcastId}/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      console.log('[roomStore] Recording uploaded:', podcastId);
     } catch (err) {
-      console.error('[Audio Monitor] Failed to toggle monitoring:', err);
-      toast.error('Failed to toggle self-monitoring');
+      console.error('[roomStore] Failed to upload recording:', err);
+    } finally {
+      set({ isUploading: false, currentPodcastId: null });
     }
   },
 
-  joinAgoraChannel: async (userId: number, roomId: string) => {
-    const already = get();
-    if (already.agoraJoining || already.agoraJoined) return;
+  startRecording() {
+    const { isRecording, socket, currentRoom } = get();
+    if (isRecording || !socket || !currentRoom) return;
 
-    try {
-      set({ agoraJoining: true });
-      const { isMuted, selectedMicrophoneId } = get();
+    // Emit to server so other clients know recording is happening
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('start-recording', { roomId: currentRoom.id });
 
-      const appId = import.meta.env.VITE_AGORA_APP_ID as string | undefined;
-      if (!appId || appId === 'YOUR_AGORA_APP_ID') {
-        console.warn('[Agora] VITE_AGORA_APP_ID not set — skipping WebRTC join.');
-        set({ agoraJoining: false });
-        return;
-      }
+    const audioContext = new AudioContext();
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
 
-      const client = getAgoraClient();
+    // Capture mic directly via getUserMedia — bypasses Agora's muted state
+    // so the recording always contains the user's voice regardless of mute toggle.
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((micStream) => {
+      const dest = audioContext.createMediaStreamDestination();
+      const micSource = audioContext.createMediaStreamSource(micStream);
+      micSource.connect(dest);
 
-      if ((client.connectionState as string) !== 'DISCONNECTED') {
-        await client.leave();
-      }
-
-      const channelName = roomId;
-      const uid = userId;
-
-      let token: string | null = null;
-      try {
-        const res = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
-        if (res.ok) {
-          const data = await res.json();
-          token = data.token ?? null;
-          console.log('[Agora] Token fetched, expiresAt:', data.expiresAt ? new Date(data.expiresAt).toISOString() : 'N/A');
-        } else {
-          console.warn('[Agora] Token fetch failed with status:', res.status);
-        }
-      } catch (err) {
-        console.warn('[Agora] Token fetch threw:', err);
-      }
-
-      await client.join(appId, channelName, token || null, uid);
-      console.log('[Agora] Joined channel:', channelName, 'uid:', uid);
-
-      // Request microphone permission first
-      try {
-        console.log('[Agora] Requesting microphone permission...');
-        const permissionStream = await navigator.mediaDevices.getUserMedia({
-          audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
-        });
-        // Stop the tracks immediately - Agora will request its own
-        permissionStream.getTracks().forEach(track => track.stop());
-        console.log('[Agora] Microphone permission granted');
-      } catch (permErr) {
-        console.error('[Agora] Microphone permission denied:', permErr);
-        toast.error('Microphone permission denied. Please allow microphone access in your browser.');
-        await client.leave();
-        set({ agoraJoining: false });
-        return;
-      }
-
-      // Create microphone track
-      const audioConfig = selectedMicrophoneId 
-        ? { microphoneId: selectedMicrophoneId, AEC: true, ANS: false, AGC: true }
-        : { AEC: true, ANS: false, AGC: true };
-      
-      const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack(audioConfig);
-      localAudioTrack.setEnabled(!isMuted);
-      console.log('[Agora] Microphone track created, muted:', isMuted);
-
-      await client.publish(localAudioTrack);
-      console.log('[Agora] Published local audio track');
-
-      client.on('user-published', async (remoteUser: any, mediaType: string) => {
-        if (mediaType !== 'audio') return;
-        await client.subscribe(remoteUser, mediaType);
-        remoteUser.audioTrack?.play();
-        console.log('[Agora] Remote user published audio:', remoteUser.uid);
-
-        // Mix remote audio if recording is active
-        const mixer = (globalThis as any).__lucyMixer as LucyMixer;
-        if (mixer?.context && mixer?.dest && remoteUser.audioTrack) {
-          try {
-            const stream = new MediaStream([remoteUser.audioTrack.getMediaStreamTrack()]);
-            const source = mixer.context.createMediaStreamSource(stream);
-            source.connect(mixer.dest);
-          } catch (err) {
-            console.warn('[Agora] Failed to attach remote stream to mixer:', err);
-          }
-        }
-      });
-
-      client.on('connection-state-change', (state: string, prevState: string) => {
-        console.log('[Agora] Connection state:', prevState, '→', state);
-      });
-
-      (client as any).__localAudioTrack = localAudioTrack;
-
-      const timer = window.setInterval(() => {
-        try {
-          if (client.connectionState === 'CONNECTED') {
-            const stats = client.getRTCStats();
-            if (stats && typeof stats.RTT === 'number') {
-              set({ latencyMs: stats.RTT });
+      // Also grab remote audio from Agora's audio context if available.
+      const { audioContext: agoraCtx, agoraClient } = get();
+      if (agoraCtx && agoraClient) {
+        agoraClient.remoteUsers.forEach((user) => {
+          if (user.hasAudio && user.audioTrack) {
+            try {
+              const remoteTrack = user.audioTrack.getMediaStreamTrack();
+              const remoteSource = agoraCtx.createMediaStreamSource(new MediaStream([remoteTrack]));
+              remoteSource.connect(dest);
+            } catch (err) {
+              console.warn('[roomStore] Could not add remote user to recording stream:', err);
             }
           }
-        } catch { }
-      }, 2000);
+        });
+      }
 
-      set({ agoraReady: true, agoraJoined: true, agoraJoining: false, latencyTimer: timer as any });
-    } catch (err: any) {
-      if (String(err).includes('OPERATION_ABORTED')) {
-        console.log('[Agora] Join operation aborted cleanly.');
-        set({ agoraJoining: false });
+      const stream = dest.stream;
+      const chunks: Blob[] = [];
+      let options = { mimeType: 'audio/webm;codecs=opus' };
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options = { mimeType: 'audio/webm' };
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+          options = { mimeType: 'audio/ogg;codecs=opus' };
+          if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            options = { mimeType: '' };
+          }
+        }
+      }
+
+      const recorder = new MediaRecorder(stream, options);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        audioContext.close();
+        micStream.getTracks().forEach((t) => t.stop());
+        const finalChunks = [...chunks];
+        set({ recordedChunks: [] });
+
+        const { currentPodcastId: podcastId, currentRoom: room } = get();
+        if (!podcastId || !room) return;
+
+        get().uploadRecording(podcastId, finalChunks);
+      };
+
+      recorder.start(1000);
+      const interval = setInterval(() => {
+        set((s) => ({ recordingTime: s.recordingTime + 1 }));
+      }, 1000);
+
+      set({
+        isRecording: true,
+        recordingTime: 0,
+        mediaRecorder: recorder,
+        recordedChunks: chunks,
+        recordingInterval: interval,
+      });
+    }).catch((err) => {
+      console.error('[roomStore] Failed to get microphone for recording:', err);
+    });
+  },
+
+  stopRecording() {
+    const { isRecording, mediaRecorder, recordingInterval, socket, currentRoom } = get();
+    if (!isRecording || !mediaRecorder || mediaRecorder.state === 'inactive') return;
+
+    // Emit to server — server creates podcast record then broadcasts recording-stopped.
+    if (socket && currentRoom) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (socket as any).emit('stop-recording', { roomId: currentRoom.id });
+    }
+
+    mediaRecorder.stop();
+    if (recordingInterval) clearInterval(recordingInterval);
+
+    set({
+      isRecording: false,
+      recordingTime: 0,
+      mediaRecorder: null,
+      recordingInterval: null,
+      // Keep recordedChunks in state — upload is deferred to the recording-stopped handler
+      // where currentPodcastId is guaranteed to be set by the server.
+    });
+  },
+
+  // ── Agora ────────────────────────────────────────────────────────────────────
+
+  async joinAgoraChannel(userId, roomId) {
+    const { agoraJoined, agoraJoining, agoraFailed, agoraClient } = get();
+    if (agoraJoined || agoraJoining || agoraFailed) return;
+
+    if (agoraClient) {
+      if (agoraClient.connectionState === 'CONNECTED' || agoraClient.connectionState === 'CONNECTING') {
+        console.log('[roomStore] Agora client is already connected or connecting. Aborting.');
         return;
       }
-      console.error('[Agora] Failed to join channel:', err);
-      toast.error('Failed to join audio channel. Please check your connection.');
-      set({ agoraJoining: false });
+      try {
+        if (agoraClient.connectionState !== 'DISCONNECTED') {
+          await agoraClient.leave();
+        }
+      } catch {}
+    }
+
+    set({ agoraJoining: true });
+
+    try {
+      const res = await roomsApi.agoraToken(roomId, userId);
+      const { token, channelName, uid } = res.data;
+
+      const client = agoraClient || AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+      const { selectedMicrophoneId: micId, isMuted: currentlyMuted } = get();
+
+      // Get raw mic stream FIRST — this feeds the analyser with real PCM data.
+      // Agora's internal capture doesn't expose raw audio to Web Audio API.
+      const rawStream = await navigator.mediaDevices.getUserMedia({
+        audio: micId ? { deviceId: { exact: micId } } : true,
+      });
+      const rawTrack = rawStream.getAudioTracks()[0];
+
+      const audioContext = new AudioContext();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+      const source = audioContext.createMediaStreamSource(rawStream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+      source.connect(analyser);
+
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = get().isSelfMonitoring ? 1 : 0;
+      source.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // Agora gets the SAME raw track — it handles its own encoding/network separately.
+      // We pass the raw track directly instead of letting Agora create its own capture.
+      const audioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+        microphoneId: micId || undefined,
+        encoderConfig: 'speech_standard',
+        AGC: true,
+        // @ts-expect-error – raw track injection supported at runtime
+        audioTrack: rawTrack,
+      });
+
+      client.on('user-published', async (user, mediaType) => {
+        if (mediaType === 'audio') {
+          await client.subscribe(user, 'audio');
+          user.audioTrack?.play();
+        }
+      });
+
+      client.on('user-unpublished', (user, mediaType) => {
+        if (mediaType === 'audio') {
+          client.unsubscribe(user, 'audio');
+        }
+      });
+
+      const agoraAppId = (import.meta.env.VITE_AGORA_APP_ID as string | undefined) || '';
+      console.log('[roomStore] Agora join — AppID:', agoraAppId, 'channel:', channelName, 'uid:', uid, 'token:', token ? 'present' : 'missing');
+      if (!agoraAppId) {
+        console.error('[roomStore] Agora App ID is missing. Check your .env VITE_AGORA_APP_ID.');
+        set({ agoraJoining: false, agoraJoined: false, agoraFailed: true });
+        return;
+      }
+      await client.join(agoraAppId, channelName, token, uid);
+      await client.publish(audioTrack);
+
+      // Track đã publish thành công khi đang enabled (mặc định).
+      // Giờ đồng bộ với trạng thái isMuted hiện tại của UI.
+      if (currentlyMuted) {
+        await audioTrack.setEnabled(false);
+      }
+
+      set({
+        agoraClient: client,
+        localAudioTrack: audioTrack,
+        audioContext,
+        analyserNode: analyser,
+        monitoringGain: gainNode,
+        selectedMicrophoneId: micId,
+        agoraReady: true,
+        agoraJoined: true,
+        agoraJoining: false,
+      });
+      // eslint-disable-next-line no-console
+      console.log('[joinAgoraChannel] analyserNode set:', analyser, 'fftSize:', analyser.fftSize);
+    } catch (err) {
+      console.error('[roomStore] Agora join failed:', err);
+      set({ agoraJoining: false, agoraJoined: false, agoraFailed: true });
     }
   },
 
-  leaveAgoraChannel: async () => {
-    set({ agoraReady: false, agoraJoined: false, agoraJoining: false, isSelfMonitoring: false });
-    const { latencyTimer } = get();
-    if (latencyTimer) {
-      window.clearInterval(latencyTimer);
-      set({ latencyTimer: null, latencyMs: null });
+  async leaveAgoraChannel() {
+    const { agoraClient, localAudioTrack, audioContext } = get();
+
+    if (agoraClient) {
+      if (localAudioTrack) {
+        await agoraClient.unpublish(localAudioTrack);
+        localAudioTrack.stop();
+        localAudioTrack.close();
+      }
+      await agoraClient.leave();
     }
 
-    const monitor = (globalThis as any).__lucyAudioMonitor as AudioMonitor;
-    if (monitor.isConnected) {
-      if (monitor.sourceNode) monitor.sourceNode.disconnect();
-      if (monitor.gainNode) monitor.gainNode.disconnect();
-      if (monitor.context && monitor.context.state !== 'closed') {
-        monitor.context.close();
-      }
-      monitor.context = null;
-      monitor.gainNode = null;
-      monitor.sourceNode = null;
-      monitor.streamDest = null;
-      monitor.isConnected = false;
+    if (audioContext) {
+      audioContext.close();
     }
+
+    set({
+      agoraClient: null,
+      localAudioTrack: null,
+      agoraReady: false,
+      agoraJoined: false,
+      agoraJoining: false,
+      agoraFailed: false,
+      audioContext: null,
+      analyserNode: null,
+      monitoringGain: null,
+    });
+  },
+
+  // ── Microphone ───────────────────────────────────────────────────────────────
+
+  async switchMicrophone(deviceId) {
+    const { agoraClient, localAudioTrack, analyserNode, audioContext, isSelfMonitoring, agoraJoined } = get();
+    if (!audioContext || !analyserNode) return;
 
     try {
-      const client = getAgoraClient();
-      if ((client.connectionState as string) !== 'DISCONNECTED') {
-        const localTrack = (client as any).__localAudioTrack;
-        if (localTrack) {
-          localTrack.close();
-          delete (client as any).__localAudioTrack;
-        }
-        await client.leave();
+      const newTrack = await AgoraRTC.createMicrophoneAudioTrack({
+        microphoneId: deviceId,
+        encoderConfig: 'speech_standard',
+        AGC: true,
+      });
+
+      const mediaStreamTrack = newTrack.getMediaStreamTrack();
+      const source = audioContext.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = isSelfMonitoring ? 1 : 0;
+      source.connect(analyserNode);
+      analyserNode.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      if (agoraClient && localAudioTrack && agoraJoined) {
+        await agoraClient.unpublish(localAudioTrack);
+        localAudioTrack.stop();
+        localAudioTrack.close();
+        await agoraClient.publish(newTrack);
       }
-      set({ isSpeaking: false });
+
+      set({ localAudioTrack: newTrack, selectedMicrophoneId: deviceId, monitoringGain: gainNode });
     } catch (err) {
-      console.error('[Agora] Failed to leave channel:', err);
+      console.error('[roomStore] Failed to switch microphone:', err);
     }
+  },
+
+  toggleSelfMonitoring() {
+    const { isSelfMonitoring, monitoringGain, isMuted } = get();
+    if (isMuted) return;
+
+    const newValue = !isSelfMonitoring;
+    if (monitoringGain) {
+      monitoringGain.gain.value = newValue ? 1 : 0;
+    }
+    set({ isSelfMonitoring: newValue });
+  },
+
+  getLocalVolumeLevel() {
+    const { analyserNode } = get();
+    if (!analyserNode) return 0;
+
+    const freqArr = new Uint8Array(analyserNode.frequencyBinCount);
+    analyserNode.getByteFrequencyData(freqArr);
+    const freqAvg = freqArr.reduce((a, b) => a + b, 0) / freqArr.length;
+
+    const timeArr = new Uint8Array(analyserNode.frequencyBinCount);
+    analyserNode.getByteTimeDomainData(timeArr);
+    let sum = 0;
+    let max = 0;
+    for (let i = 0; i < timeArr.length; i++) {
+      const val = (timeArr[i] - 128) / 128;
+      sum += val * val;
+      const dev = Math.abs(timeArr[i] - 128);
+      if (dev > max) max = dev;
+    }
+    const rms = Math.sqrt(sum / timeArr.length);
+    const result = Math.min(100, rms * 500);
+
+    // eslint-disable-next-line no-console
+    console.log('[getLocalVolumeLevel] freqAvg:', freqAvg.toFixed(1), '| timeRMS:', rms.toFixed(4), 'maxDev:', max, '→', result.toFixed(1));
+
+    return result;
+  },
+
+  // ── Latency ─────────────────────────────────────────────────────────────────
+
+  measureLatency() {
+    const { socket, pingInterval } = get();
+    if (!socket) return;
+
+    if (pingInterval) clearInterval(pingInterval);
+
+    const interval = setInterval(() => {
+      const sentAt = Date.now();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (socket as any).emit('ping', (res: { ok: boolean; t: number }) => {
+        if (res?.ok) {
+          set({ latencyMs: Date.now() - sentAt });
+        }
+      });
+    }, 5000);
+
+    set({ pingInterval: interval });
   },
 }));
