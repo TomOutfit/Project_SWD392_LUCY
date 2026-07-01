@@ -78,7 +78,7 @@ using (var scope = app.Services.CreateScope())
                     DisplayName = acc.DisplayName.Trim(),
                     PersonaId = acc.PersonaId,
                     Role = acc.Role,
-                    WalletBalance = 500m
+                    WalletBalance = 100000m
                 };
                 db.Users.Add(user);
                 db.SaveChanges();
@@ -86,7 +86,7 @@ using (var scope = app.Services.CreateScope())
                 db.WalletLedger.Add(new WalletLedger
                 {
                     UserId = user.Id,
-                    Amount = 500m,
+                    Amount = 100000m,
                     Type = "Deposit",
                     Description = "Welcome bonus"
                 });

@@ -1,5 +1,6 @@
 using LucyNetService.Data;
 using LucyNetService.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -11,9 +12,13 @@ namespace LucyNetService.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+[Produces("application/json")]
 public class AuthController(AppDbContext db, IConfiguration config) : ControllerBase
 {
     [HttpPost("register")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password) || string.IsNullOrWhiteSpace(req.DisplayName))
@@ -29,7 +34,7 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
             DisplayName = req.DisplayName.Trim(),
             PersonaId = req.PersonaId,
             Role = "LUCY",
-            WalletBalance = 100m
+            WalletBalance = 100000m
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
@@ -37,7 +42,7 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
         db.WalletLedger.Add(new WalletLedger
         {
             UserId = user.Id,
-            Amount = 100m,
+            Amount = 100000m,
             Type = "Deposit",
             Description = "Welcome bonus"
         });
@@ -47,6 +52,8 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
     }
 
     [HttpPost("login")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == req.Email.ToLower().Trim());

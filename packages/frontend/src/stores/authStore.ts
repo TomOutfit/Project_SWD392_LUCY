@@ -13,6 +13,7 @@ interface AuthState {
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string, displayName: string, personaId: number) => Promise<boolean>;
   logout: () => void;
+  updateUser: (user: Partial<User>) => void;
   updateBalance: (balance: number) => void;
   clearError: () => void;
 }
@@ -56,6 +57,11 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         localStorage.removeItem('lucy_token');
         set({ user: null, token: null, isAuthenticated: false });
+      },
+
+      updateUser: (updatedData) => {
+        const user = get().user;
+        if (user) set({ user: { ...user, ...updatedData } });
       },
 
       updateBalance: (balance) => {

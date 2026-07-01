@@ -43,12 +43,16 @@ export const authApi = {
 export const usersApi = {
   me: () => api.get('/users/me'),
   leaderboard: () => api.get('/users/leaderboard'),
+  updateMe: (data: { displayName?: string; personaId?: number }) => api.put('/users/me', data),
+  deleteMe: () => api.delete('/users/me'),
 };
 
 // Wallet
 export const walletApi = {
   get: () => api.get('/wallet'),
   deposit: (amount: number) => api.post('/wallet/deposit', { amount }),
+  updateBalance: (amount: number) => api.put('/wallet', { amount }),
+  clearHistory: () => api.delete('/wallet'),
   sendGift: (data: { recipientEmail: string; roomId: string; giftType: string; amount: number }) =>
     api.post('/gifts/send', data),
 };
