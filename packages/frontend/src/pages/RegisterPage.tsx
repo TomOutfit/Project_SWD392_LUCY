@@ -15,11 +15,13 @@ export default function RegisterPage() {
   const [personaId, setPersonaId] = useState(1);
   const { register, isLoading, error, clearError } = useAuthStore();
   const navigate = useNavigate();
+  const searchParams = new URLSearchParams(window.location.search);
+  const redirect = searchParams.get('redirect') || '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const ok = await register(email, password, displayName, personaId);
-    if (ok) navigate('/');
+    if (ok) navigate(redirect);
   };
 
   return (

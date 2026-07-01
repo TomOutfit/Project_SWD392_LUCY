@@ -1,15 +1,20 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mic2, Volume2, VolumeX, Loader2, Info } from 'lucide-react';
+import { Mic2, Volume2, VolumeX, Loader2, Info, ArrowRight } from 'lucide-react';
 import { AgoraRoom } from '@/components/AgoraRoom';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
+import { Button } from '@/components/ui/Button';
 
 export default function SpeakingRoomPage() {
   const { roomId } = useParams();
   const { currentRoom, isConnected, joiningRoomId, joinRoom, connectSocket, joinAgoraChannel, agoraJoined, agoraJoining, agoraFailed } = useRoomStore();
-  const { user } = useAuthStore();
+  const { user, loginAsGuest } = useAuthStore();
+
+  const [guestName, setGuestName] = useState(() => `Guest_${Math.floor(1000 + Math.random() * 9000)}`);
+  const [isLoggingInGuest, setIsLoggingInGuest] = useState(false);
+  const [guestError, setGuestError] = useState<string | null>(null);
 
   // Mic testing state
   const [micTestActive, setMicTestActive] = useState(false);
@@ -107,6 +112,93 @@ export default function SpeakingRoomPage() {
   }, []);
 
   // ── Loading / connecting state ──────────────────────────────────────────────
+  if (!user) {
+    const handleJoinAsGuest = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!guestName.trim()) {
+        setGuestError('Please enter a display name');
+        return;
+      }
+      setIsLoggingInGuest(true);
+      setGuestError(null);
+      const ok = await loginAsGuest(guestName.trim());
+      setIsLoggingInGuest(false);
+      if (!ok) {
+        setGuestError('Failed to join room as guest. Please try again.');
+      }
+    };
+
+    return (
+      <div className="min-h-screen relative overflow-hidden bg-[#0B0B1A] flex items-center justify-center p-4">
+        {/* Background Cyber-Grid Pattern & Mesh Glows */}
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-20">
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+          <div className="absolute top-[10%] left-[10%] w-[50%] h-[50%] bg-[radial-gradient(circle_at_center,rgba(123,47,255,0.15),transparent_50%)] blur-[80px]" />
+          <div className="absolute bottom-[10%] right-[10%] w-[50%] h-[50%] bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.12),transparent_50%)] blur-[90px]" />
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative z-10 w-full max-w-md glass rounded-3xl p-8 border border-ghost shadow-[0_0_30px_rgba(0,245,255,0.05)] space-y-6"
+        >
+          {/* Logo */}
+          <div className="text-center">
+            <div className="inline-flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan to-violet flex items-center justify-center shadow-[0_0_20px_rgba(0,245,255,0.4)]">
+                <span className="text-void font-orbitron font-black text-2xl">L</span>
+              </div>
+            </div>
+            <h1 className="font-orbitron font-black text-3xl text-[#F0F4FF] mb-1.5 tracking-wider">LUCY ROOM</h1>
+            <p className="text-mist font-inter text-xs tracking-wide uppercase text-cyan font-semibold">Join Interactive Speaking Room</p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-navy/60 border border-ghost/45 text-center text-xs text-mist leading-relaxed">
+            You don't need an account to join! Just enter your nickname below to connect to this voice lounge.
+          </div>
+
+          {guestError && (
+            <div className="p-3 rounded-lg bg-magenta/10 border border-magenta/30 text-magenta text-xs text-center">
+              {guestError}
+            </div>
+          )}
+
+          <form onSubmit={handleJoinAsGuest} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-mist uppercase tracking-wider block">Your Nickname</label>
+              <input
+                type="text"
+                value={guestName}
+                onChange={e => setGuestName(e.target.value)}
+                maxLength={20}
+                className="w-full text-center text-sm font-semibold h-11 bg-navy/50 border border-ghost focus:border-cyan text-[#F0F4FF] rounded-xl outline-none focus:shadow-[0_0_10px_rgba(0,245,255,0.1)] transition-all"
+                placeholder="e.g. NeonLearner"
+                required
+              />
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full justify-center bg-cyan text-void shadow-[0_0_15px_rgba(0,245,255,0.3)] hover:shadow-[0_0_25px_rgba(0,245,255,0.5)] font-bold py-3.5"
+              loading={isLoggingInGuest}
+            >
+              Enter Speaking Room <ArrowRight className="w-4 h-4 ml-1.5" />
+            </Button>
+          </form>
+
+          <div className="text-center border-t border-ghost/40 pt-4">
+            <p className="text-xs text-mist">
+              Already have an account?{' '}
+              <a href={`/login?redirect=/speaking/${roomId}`} className="text-cyan font-bold hover:underline">
+                Sign In
+              </a>
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   const isLoading = !currentRoom || (isConnected && !agoraJoined && !agoraJoining && !agoraFailed);
 
   if (isLoading) {

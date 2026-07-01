@@ -62,9 +62,7 @@ export default function App() {
             <ProtectedRoute><CreateRoomPage /></ProtectedRoute>
           } />
           <Route path="/speaking" element={<Navigate to="/browse" replace />} />
-          <Route path="/speaking/:roomId" element={
-            <ProtectedRoute><SpeakingRoomPage /></ProtectedRoute>
-          } />
+          <Route path="/speaking/:roomId" element={<SpeakingRoomPage />} />
           <Route path="/leaderboard" element={
             <ProtectedRoute><LeaderboardPage /></ProtectedRoute>
           } />

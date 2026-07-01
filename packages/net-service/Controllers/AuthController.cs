@@ -87,6 +87,31 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    [HttpPost("guest")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GuestLogin([FromBody] GuestLoginRequest req)
+    {
+        var randomId = new Random().Next(10000, 99999);
+        var displayName = string.IsNullOrWhiteSpace(req.DisplayName) 
+            ? $"Guest_{randomId}" 
+            : req.DisplayName.Trim();
+
+        var user = new User
+        {
+            Email = $"guest_{randomId}@lucy.com",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("GuestPassword123!"),
+            DisplayName = displayName,
+            PersonaId = new Random().Next(1, 6),
+            Role = "LUCY",
+            WalletBalance = 0m
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = MapUser(user) });
+    }
+
     private static object MapUser(User u) => new
     {
         u.Id, u.Email, u.DisplayName, u.PersonaId, u.Role, u.WalletBalance
@@ -95,3 +120,4 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
 
 public record RegisterRequest(string Email, string Password, string DisplayName, int PersonaId);
 public record LoginRequest(string Email, string Password);
+public record GuestLoginRequest(string? DisplayName);

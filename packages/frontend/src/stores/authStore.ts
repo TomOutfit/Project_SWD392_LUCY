@@ -12,6 +12,7 @@ interface AuthState {
   error: string | null;
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string, displayName: string, personaId: number) => Promise<boolean>;
+  loginAsGuest: (displayName?: string) => Promise<boolean>;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
   updateBalance: (balance: number) => void;
@@ -36,6 +37,20 @@ export const useAuthStore = create<AuthState>()(
           return true;
         } catch {
           set({ error: 'Invalid email or password', isLoading: false });
+          return false;
+        }
+      },
+
+      loginAsGuest: async (displayName) => {
+        set({ isLoading: true, error: null });
+        try {
+          const { data } = await authApi.guest(displayName);
+          localStorage.setItem('lucy_token', data.token);
+          set({ user: data.user, token: data.token, isAuthenticated: true, isLoading: false });
+          return true;
+        } catch (err: any) {
+          const msg = err?.response?.data?.error ?? 'Guest login failed';
+          set({ error: msg, isLoading: false });
           return false;
         }
       },

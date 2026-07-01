@@ -12,11 +12,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const { login, isLoading, error, clearError } = useAuthStore();
   const navigate = useNavigate();
+  const searchParams = new URLSearchParams(window.location.search);
+  const redirect = searchParams.get('redirect') || '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const ok = await login(email, password);
-    if (ok) navigate('/');
+    if (ok) navigate(redirect);
   };
 
   return (
