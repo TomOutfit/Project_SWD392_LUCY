@@ -52,11 +52,11 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddCors(opt =>
     opt.AddDefaultPolicy(policy =>
-        policy.WithOrigins("http://localhost:5173", "https://lucygroup.vercel.app", "http://lucygroup.vercel.app")
-              .SetIsOriginAllowed(_ => true)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials()));
+        policy
+            .SetIsOriginAllowed(_ => true)   // Echo any Origin back (needed for credentials)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials()));
 
 var app = builder.Build();
 
