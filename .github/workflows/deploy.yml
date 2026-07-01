@@ -85,18 +85,23 @@ jobs:
 
     steps:
       - name: 📡 Trigger Render Deploy Hook
-        # Render re-pulls the :latest image from GHCR and redeploys.
-        # Add RENDER_DEPLOY_HOOK_URL to your GitHub repo Secrets.
-        run: |
-          curl -s -o /dev/null -w "%{http_code}" \
-            --fail \
-            "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
-        # Exit non-zero if the HTTP status is not 2xx
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-
-      - name: ✅ Deployment triggered
         run: |
-          echo "Render deployment triggered successfully."
-          echo "Image: ghcr.io/${{ env.IMAGE_NAME }}:latest"
-          echo "Commit: ${{ github.sha }}"
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "⚠️  RENDER_DEPLOY_HOOK_URL secret is not set — skipping deploy trigger."
+            echo ""
+            echo "   To enable auto-deploy:"
+            echo "   1. Create a Web Service on Render pointing to:"
+            echo "      ghcr.io/${{ env.IMAGE_NAME }}:latest"
+            echo "   2. Copy the Deploy Hook URL from Render → Settings → Deploy Hook"
+            echo "   3. Add it as RENDER_DEPLOY_HOOK_URL in:"
+            echo "      GitHub repo → Settings → Secrets → Actions"
+            exit 0
+          fi
+
+          echo "🚀 Triggering Render redeploy..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --fail "$RENDER_DEPLOY_HOOK_URL")
+          echo "✅ Render responded with HTTP $HTTP_STATUS"
+          echo "   Image: ghcr.io/${{ env.IMAGE_NAME }}:latest"
+          echo "   Commit: ${{ github.sha }}"
