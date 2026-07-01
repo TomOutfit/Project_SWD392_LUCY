@@ -107,14 +107,10 @@ app.MapControllers();
 Console.WriteLine("\n🔐 LUCY .NET Identity & Payment Service");
 
 // Priority order for listen URL:
-//   1. ASPNETCORE_URLS (supervisord sets this in all-in-one Docker)
-//   2. PORT (Render injects this — must bind on 0.0.0.0, not localhost)
-//   3. Fallback: localhost:5001 for local dev
-var listenUrl =
-    Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
-    ?? (Environment.GetEnvironmentVariable("PORT") is string port
-        ? $"http://0.0.0.0:{port}"
-        : "http://localhost:5001");
+//   1. ASPNETCORE_URLS — set by supervisord to "http://localhost:5001" (all-in-one Docker)
+//   2. Fallback: localhost:5001 for local dev
+// NOTE: Do NOT read the PORT env var here — in Docker, PORT=80 is reserved for nginx.
+var listenUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5001";
 
 Console.WriteLine($"📄 Listening on: {listenUrl}\n");
 app.Run(listenUrl);
