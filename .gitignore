@@ -34,3 +34,9 @@ obj/
 !.env.example
 
 friction-log.md
+.env
+.env.local
+.env.*.local
+packages/njs-service/data/*.db
+packages/njs-service/data/*.db-shm
+packages/njs-service/data/*.db-wal
