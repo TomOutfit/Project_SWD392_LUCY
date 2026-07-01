@@ -1,4 +1,5 @@
 using LucyNetService.Data;
+using LucyNetService.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -59,6 +60,42 @@ builder.Services.AddCors(opt =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var sampleAccounts = app.Configuration.GetSection("SampleAccounts").Get<List<SampleAccountConfig>>();
+    if (sampleAccounts != null && sampleAccounts.Any())
+    {
+        foreach (var acc in sampleAccounts)
+        {
+            var emailLower = acc.Email.ToLower().Trim();
+            if (!db.Users.Any(u => u.Email == emailLower))
+            {
+                var user = new User
+                {
+                    Email = emailLower,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(acc.Password),
+                    DisplayName = acc.DisplayName.Trim(),
+                    PersonaId = acc.PersonaId,
+                    Role = acc.Role,
+                    WalletBalance = 500m
+                };
+                db.Users.Add(user);
+                db.SaveChanges();
+
+                db.WalletLedger.Add(new WalletLedger
+                {
+                    UserId = user.Id,
+                    Amount = 500m,
+                    Type = "Deposit",
+                    Description = "Welcome bonus"
+                });
+            }
+        }
+        db.SaveChanges();
+    }
+}
+
 app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "LUCY .NET Service v1"));
 
@@ -71,3 +108,13 @@ Console.WriteLine("\n🔐 LUCY .NET Identity & Payment Service");
 Console.WriteLine("📄 Swagger UI: http://localhost:5001/swagger\n");
 
 app.Run("http://localhost:5001");
+
+public class SampleAccountConfig
+{
+    public string Email { get; set; } = "";
+    public string Password { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Role { get; set; } = "LUCY";
+    public int PersonaId { get; set; } = 1;
+}
+

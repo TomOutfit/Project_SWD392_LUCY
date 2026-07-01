@@ -128,6 +128,17 @@ export function AgoraRoom() {
         toast.success(`Gift sent to ${recipientName}!`);
         setShowGiftModal(false);
         setSelectedGift(null);
+
+        // Emit real-time socket event for the gift
+        const socket = useRoomStore.getState().socket;
+        if (socket) {
+          socket.emit('send-gift', {
+            roomId: currentRoom.id,
+            giftType: selectedGift.id,
+            amount: selectedGift.price,
+            recipientId,
+          });
+        }
       }
     } catch {
       toast.error('Failed to send gift');
@@ -455,9 +466,9 @@ export function AgoraRoom() {
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-xl bg-midnight border border-ghost">
-              <Avatar personaId={user.personaId} name={user.displayName} size="md" showBadge role={user.role} />
+              <Avatar personaId={user.personaId} name={me?.oderName || user.displayName} size="md" showBadge role={user.role} />
               <div className="flex-1">
-                <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{user.displayName} <span className="text-mist">(You)</span></p>
+                <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{me?.oderName || user.displayName} <span className="text-mist">(You)</span></p>
                 <p className="text-xs text-mist">
                   {isSpeaking ? 'Speaking' : isMuted ? 'Muted' : 'Ready to speak'}
                 </p>

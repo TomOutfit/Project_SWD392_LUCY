@@ -13,7 +13,17 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     usersApi.leaderboard()
-      .then(r => setEntries(r.data))
+      .then(r => {
+        const mapped = (r.data || []).map((item: any, idx: number) => ({
+          rank: idx + 1,
+          userId: item.id,
+          displayName: item.displayName,
+          personaId: item.personaId,
+          role: item.role,
+          totalReceived: item.totalGiftsReceived || 0,
+        }));
+        setEntries(mapped);
+      })
       .catch(() => setEntries([]))
       .finally(() => setLoading(false));
   }, []);
@@ -54,49 +64,69 @@ export default function LeaderboardPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {entries.length >= 3 && (
-              <div className="grid grid-cols-3 gap-3 mb-6">
-                {[1, 0, 2].map(idx => {
-                  const e = entries[idx];
-                  if (!e) return null;
-                  return (
-                    <motion.div key={e.rank} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.1 }}
-                      className={`card text-center py-6 ${idx === 0 ? 'order-2 ring-2 ring-amber/30' : ''}`}>
-                      <div className="relative inline-block mb-3">
-                        <Avatar personaId={e.personaId} name={e.displayName} size="xl" showBadge role={e.role} />
-                        <div className={`absolute -top-2 -right-2 w-7 h-7 rounded-full bg-gradient-to-br ${getRankColor(e.rank)} flex items-center justify-center`}>
-                          <span className="text-white font-orbitron font-black text-xs">
-                            {e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : '🥉'}
-                          </span>
+            {entries.length >= 3 ? (
+              <>
+                <div className="grid grid-cols-3 gap-3 mb-6">
+                  {[1, 0, 2].map(idx => {
+                    const e = entries[idx];
+                    if (!e) return null;
+                    return (
+                      <motion.div key={e.userId} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.1 }}
+                        className={`card text-center py-6 ${idx === 0 ? 'order-2 ring-2 ring-amber/30' : ''}`}>
+                        <div className="relative inline-block mb-3">
+                          <Avatar personaId={e.personaId} name={e.displayName} size="xl" showBadge role={e.role} />
+                          <div className={`absolute -top-2 -right-2 w-7 h-7 rounded-full bg-gradient-to-br ${getRankColor(e.rank)} flex items-center justify-center`}>
+                            <span className="text-white font-orbitron font-black text-xs">
+                              {e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : '🥉'}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      <p className="font-exo font-bold text-[#F0F4FF]">{e.displayName}</p>
-                      <Badge variant={e.role === 'SUPER' ? 'magenta' : e.role === 'PRO' ? 'violet' : 'cyan'}>{e.role}</Badge>
-                      <p className="text-amber font-mono font-bold text-lg mt-2">${e.totalReceived.toFixed(0)}</p>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
+                        <p className="font-exo font-bold text-[#F0F4FF]">{e.displayName}</p>
+                        <Badge variant={e.role === 'SUPER' ? 'magenta' : e.role === 'PRO' ? 'violet' : 'cyan'}>{e.role}</Badge>
+                        <p className="text-amber font-mono font-bold text-lg mt-2">${e.totalReceived.toFixed(0)}</p>
+                      </motion.div>
+                    );
+                  })}
+                </div>
 
-            {entries.slice(3).map((e, i) => (
-              <motion.div key={e.userId} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: (i + 3) * 0.05 }} className="card flex items-center gap-4 py-3">
-                <div className="w-8 text-center">
-                  <span className="font-mono font-bold text-mist">{e.rank}</span>
-                </div>
-                <Avatar personaId={e.personaId} name={e.displayName} size="sm" />
-                <div className="flex-1">
-                  <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{e.displayName}</p>
-                  <Badge variant={e.role === 'SUPER' ? 'magenta' : e.role === 'PRO' ? 'violet' : 'cyan'}>{e.role}</Badge>
-                </div>
-                <div className="flex items-center gap-1 text-amber">
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  <span className="font-mono font-bold text-sm">${e.totalReceived.toFixed(0)}</span>
-                </div>
-              </motion.div>
-            ))}
+                {entries.slice(3).map((e, i) => (
+                  <motion.div key={e.userId} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: (i + 3) * 0.05 }} className="card flex items-center gap-4 py-3">
+                    <div className="w-8 text-center">
+                      <span className="font-mono font-bold text-mist">{e.rank}</span>
+                    </div>
+                    <Avatar personaId={e.personaId} name={e.displayName} size="sm" />
+                    <div className="flex-1">
+                      <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{e.displayName}</p>
+                      <Badge variant={e.role === 'SUPER' ? 'magenta' : e.role === 'PRO' ? 'violet' : 'cyan'}>{e.role}</Badge>
+                    </div>
+                    <div className="flex items-center gap-1 text-amber">
+                      <TrendingUp className="w-3.5 h-3.5" />
+                      <span className="font-mono font-bold text-sm">${e.totalReceived.toFixed(0)}</span>
+                    </div>
+                  </motion.div>
+                ))}
+              </>
+            ) : (
+              entries.map((e, i) => (
+                <motion.div key={e.userId} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }} className="card flex items-center gap-4 py-3">
+                  <div className="w-8 text-center">
+                    <span className="font-mono font-bold text-mist">{e.rank}</span>
+                  </div>
+                  <Avatar personaId={e.personaId} name={e.displayName} size="sm" />
+                  <div className="flex-1">
+                    <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{e.displayName}</p>
+                    <Badge variant={e.role === 'SUPER' ? 'magenta' : e.role === 'PRO' ? 'violet' : 'cyan'}>{e.role}</Badge>
+                  </div>
+                  <div className="flex items-center gap-1 text-amber">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span className="font-mono font-bold text-sm">${e.totalReceived.toFixed(0)}</span>
+                  </div>
+                </motion.div>
+              ))
+            )}
           </div>
         )}
       </motion.div>

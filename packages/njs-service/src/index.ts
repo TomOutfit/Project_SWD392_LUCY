@@ -16,6 +16,7 @@ import type { Request, Response } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import { getAnonymousName } from './utils/anonymous.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -117,9 +118,9 @@ io.use((socket, next) => {
   // In production: verify JWT from handshake auth header
   // For MVP: accept any connection
   const userId = socket.handshake.auth.userId ?? Math.floor(Math.random() * 10000);
-  const userName = socket.handshake.auth.userName ?? `User_${userId}`;
   const userPersonaId = socket.handshake.auth.personaId ?? 1;
   const userRole = socket.handshake.auth.role ?? socket.handshake.auth.userRole ?? 'LUCY';
+  const userName = getAnonymousName(userId, userRole);
 
   socket.data.userId = userId;
   socket.data.userName = userName;
@@ -143,8 +144,10 @@ app.post('/api/rooms', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    const anonHostName = getAnonymousName(hostId, hostRole);
+
     const roomId = createRoomInMemory({
-      name, hostId, hostName, hostPersonaId, hostRole,
+      name, hostId, hostName: anonHostName, hostPersonaId, hostRole,
       language: language.toUpperCase(), levelId, levelName,
       isLive: true, state: RoomState.ACTIVE, currentSubLevel: 1,
     });

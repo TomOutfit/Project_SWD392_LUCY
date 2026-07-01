@@ -31,7 +31,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     if (!existing) {
       const isHost = roomData.room.hostId === user.id;
       const participant: Participant = {
-        oderId: user.id, oderName: user.name, oderPersonaId: user.personaId,
+        oderId: user.id, oderName: userName, oderPersonaId: user.personaId,
         oderRole: user.role, joinedAt: new Date().toISOString(),
         isMuted: !isHost, isSpeaking: isHost, handRaised: false,
         speakingDurationSec: 0,
@@ -220,6 +220,23 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     const roomData = activeRooms.get(roomId);
     if (!roomData) return;
     await fetchAndEmitRecommendations(io, roomId, roomData.room);
+  });
+
+  socket.on('send-gift', ({ roomId, giftType, amount, recipientId }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData) return;
+
+    const recipient = roomData.room.participants.find(p => p.oderId === recipientId);
+    const recipientName = recipient ? recipient.oderName : `Anonymous Learner`;
+
+    io.to(roomId).emit('gift-received', {
+      id: uuidv4(),
+      senderName: socket.data.userName,
+      senderPersonaId: socket.data.userPersonaId,
+      giftType,
+      amount,
+      recipientName,
+    });
   });
 
   socket.on('disconnect', () => {

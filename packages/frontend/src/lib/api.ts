@@ -24,6 +24,7 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem('lucy_token');
       localStorage.removeItem('lucy_user');
+      localStorage.removeItem('lucy-auth');
       window.location.href = '/login';
     }
     return Promise.reject(err);
