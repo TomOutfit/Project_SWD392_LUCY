@@ -1,66 +1,50 @@
-# BÁO CÁO NGHIÊN CỨU & ÁP DỤNG DESIGN PATTERNS
-## Đề tài: Logic Chuyển Đổi Stage Tự Động Trong Hệ Thống LMS - Dự Án LUCY
+# BÁO CÁO NGHIÊN CỨU & ÁP DỤNG DESIGN PATTERNS TRONG TOÀN BỘ HỆ THỐNG LUCY
+
+## Đề tài: Phân Tích & Đánh Giá Kiến Trúc Áp Dụng Mẫu Thiết Kế (Design Patterns)
 ### Học phần: SWD392 — Software Architecture & Design
 
 ---
 
-## 1. Giới thiệu chung & Bối cảnh dự án
+## 1. Giới thiệu tổng quan hệ thống LUCY & Kiến trúc Microservices
 
-Dự án **LUCY** là nền tảng luyện nói ngoại ngữ thời gian thực dành cho Gen Z, ứng dụng mô hình gamification với lộ trình học tập gồm 100 levels chia làm 3 Stage chính (Sơ cấp, Trung cấp, Cao cấp). Mỗi level lại bao gồm 12 sub-levels tương đương với 12 mốc học tập nhỏ hơn.
+Dự án **LUCY** (Language Unity & Collaborative Youth) là nền tảng luyện nói ngoại ngữ thời gian thực dành cho thế hệ Gen Z, ứng dụng mô hình gamification với lộ trình học tập gồm 100 levels chia làm 3 Stage chính (Beginner, Intermediate, Advanced). Mỗi level bao gồm 12 sub-levels tương đương với các mốc học tập nhỏ hơn được cập nhật liên tục.
 
-Trong giai đoạn này, một trong những tính năng cốt lõi là **"Logic chuyển đổi Stage tự động"** của Node.js (`njs-service`):
+Hệ thống được thiết kế theo mô hình **Microservices** phân tán gọn nhẹ để đảm bảo tính sẵn sàng cao, chia làm 4 thành phần chính:
+1. **React Frontend (Vite + TypeScript):** Giao diện Single Page Application (SPA), tích hợp Agora RTC SDK để truyền tải âm thanh thời gian thực chất lượng cao.
+2. **.NET Identity & Payment Service (Port 5001):** Quản lý định danh (JWT Auth), phân quyền vai trò (LUCY, Pro, Super), ví điện tử và giao dịch tặng quà ảo (Gifts) sử dụng SQLite (EF Core).
+3. **Node.js Real-time & LMS Service (Port 3001):** Quản lý kết nối Socket.io, tạo phòng học, tự động hóa tiến trình học tập (LMS), sinh Agora Token, quản lý podcast ghi âm, sử dụng SQLite (Drizzle ORM).
+4. **Nginx Reverse Proxy:** Điều hướng động và phân giải CORS, cùng Docker & Supervisord quản lý vận hành container.
 
-- Mỗi **10 phút**, phòng học (`Room`) sẽ tự động tăng sub-level hiện tại (`currentSubLevel++`), tối đa 12 sub-levels.
-- Khi chuyển đổi, trạng thái phòng chuyển từ `Active` sang `Transition` (trong 3 giây để người học chuẩn bị) rồi quay lại `Active`.
-- Host cũng có thể kích hoạt chuyển Stage thủ công qua sự kiện `force-stage-transition`.
-- Hệ thống cần đồng thời thực hiện hàng loạt hành vi:
-  1. Gửi sự kiện WebSocket (`stage-changed`) tới tất cả học viên trong phòng để giao diện cập nhật.
-  2. Ghi nhận tiến độ mới của phòng học vào cơ sở dữ liệu SQLite thông qua Drizzle ORM.
-  3. Làm mới hoặc gợi ý tài liệu học tập LMS tương ứng với sub-level mới (từ vựng, câu hỏi gợi mở, ngữ pháp cốt lõi) và tự động cập nhật tài liệu ghim (`pinnedContent`).
+Để giải quyết các bài toán về liên kết lỏng (loose coupling), mở rộng tính năng không cần sửa code cũ (OCP), và tối ưu hóa trải nghiệm người dùng, nhóm phát triển đã áp dụng nhiều **Design Patterns (Mẫu thiết kế GoF)** vào cả Backend lẫn Frontend.
 
 ---
 
-## 2. Nghiên cứu lý thuyết Design Patterns (GoF)
+## 2. Tổng hợp các Design Patterns áp dụng trong dự án
 
-Theo cuốn sách kinh điển của *Gang of Four (GoF)*, các mẫu thiết kế được chia làm 3 nhóm chính:
+Dưới đây là bảng tổng hợp các Design Patterns đã được nghiên cứu và đưa vào triển khai thực tế trong mã nguồn dự án LUCY:
 
-| Nhóm Pattern | Mục đích chính | Các Pattern tiêu biểu |
-| :--- | :--- | :--- |
-| **Creational** (Khởi tạo) | Giải quyết các vấn đề liên quan đến việc khởi tạo đối tượng, giúp che giấu logic tạo dựng và độc lập với cách đối tượng được tạo ra. | Singleton, Factory Method, Abstract Factory, Builder, Prototype. |
-| **Structural** (Cấu trúc) | Giải quyết các vấn đề liên quan đến việc lắp ghép, liên kết giữa các class và object nhằm tạo nên các cấu trúc lớn hơn, linh hoạt hơn. | Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy. |
-| **Behavioral** (Hành vi) | Tập trung vào việc phân bổ trách nhiệm, giao tiếp và tương tác giữa các đối tượng để tối ưu hóa luồng xử lý dữ liệu và thuật toán. | **Observer**, **State**, Strategy, Command, Iterator, Mediator, Memento, Template Method. |
-
----
-
-## 3. Phân tích & Đề xuất Mẫu Thiết Kế từ AI (RBL)
-
-### 3.1. Quá trình tham vấn AI (ChatGPT)
-
-Theo yêu cầu RBL, nhóm phát triển đã tiến hành đặt câu hỏi tham vấn ChatGPT về giải pháp tối ưu cho tính năng chuyển đổi Stage tự động:
-
-> **Prompt gửi AI:** *"Tôi có một dịch vụ Node.js quản lý phòng học audio real-time. Mỗi 10 phút phòng tự động tăng sublevel. Khi tăng sublevel, hệ thống cần gửi socket cho client, cập nhật DB, và cập nhật tài liệu gợi ý LMS. Tôi nên dùng Design Pattern nào để code sạch, tránh tight-coupling (phụ thuộc chặt)?"*
-
-> **Kết quả gợi ý từ AI:**
-> 1. **State Pattern:** Phù hợp để quản lý các trạng thái vòng đời của phòng (`Lobby -> Active -> Transition -> Closed`) và thay đổi cách phòng xử lý dữ liệu tương ứng với từng trạng thái.
-> 2. **Observer Pattern (Publish-Subscribe):** Phù hợp nhất để giải quyết bài toán "khi một sự kiện xảy ra (Sub-level thay đổi), nhiều module độc lập cần phản hồi". Nó giúp tách biệt hoàn toàn logic đếm thời gian của phòng khỏi logic gửi socket, logic ghi DB và logic gợi ý tài liệu.
-> 3. **Kết luận từ AI:** Nên dùng **Observer Pattern** làm kiến trúc chủ đạo cho hệ thống thông báo sự kiện, và có thể dùng **State Pattern** bên trong đối tượng Room để quản lý các chuyển đổi trạng thái nghiêm ngặt.
-
-### 3.2. So sánh lựa chọn giải pháp: State vs. Observer Pattern
-
-| Tiêu chí | State Pattern | Observer Pattern (Lựa chọn chính) |
-| :--- | :--- | :--- |
-| **Trọng tâm giải quyết** | Trạng thái nội bộ của một đối tượng và sự thay đổi hành vi tương ứng với trạng thái đó. | Sự đồng bộ và truyền tin giữa một đối tượng phát tin (Subject) và nhiều đối tượng nhận tin (Observers). |
-| **Độ khớp bài toán** | Chỉ giải quyết được việc chuyển từ trạng thái `Active` sang `Transition` rồi về `Active`. Không tối ưu cho việc thêm các hành vi phụ (như ghi DB, đổi tài liệu). | Cực kỳ tối ưu. Khi Room phát ra tín hiệu "Level thay đổi", các Observer độc lập sẽ tự thực hiện nhiệm vụ của mình. |
-| **Khả năng mở rộng (Open/Closed)** | Khi thêm hành vi mới khi chuyển sublevel (vd: cộng điểm học tập), ta phải sửa lại class Room hoặc các class State. | Chỉ cần viết thêm một class Observer mới và đăng ký vào Subject. Không cần sửa đổi bất kỳ dòng code hiện tại nào của Room. |
-| **Mức độ ghép cặp (Coupling)** | Medium. Class Room vẫn cần biết về các đối tượng State. | Low (Loose Coupling). Room không cần biết các Observers là ai hay chúng làm gì, chỉ cần gọi hàm `update()`. |
-
-**Quyết định thiết kế:** Áp dụng **Observer Pattern** làm mô hình chính để liên kết các hành vi tự động khi chuyển Stage.
+| Nhóm Pattern | Pattern Áp Dụng | Vị Trí Triển Khai | Mục Đích & Vai Trò |
+| :--- | :--- | :--- | :--- |
+| **Behavioral** (Hành vi) | **Observer Pattern** | `njs-service/src/services/observer.ts` & `roomService.ts` | Quản lý logic tự động chuyển Stage của phòng học (mỗi 10 phút) để kích hoạt đồng thời các nhiệm vụ: gửi Socket cho client, ghi DB SQLite, cập nhật tài liệu học liệu mới. |
+| **Behavioral** (Hành vi) | **Strategy Pattern** | `njs-service/src/services/aiService.ts` | Đổi chiến lược sinh gợi ý học liệu (AI Recommendation) linh hoạt: Gọi trực tiếp API Gemini 2.5 Flash nếu cấu hình API Key, hoặc sử dụng bộ quy luật Keyword-based offline nếu chạy nội bộ không có kết nối ngoài. |
+| **Creational** (Khởi tạo) | **Singleton Pattern** | `njs-service/src/db/index.ts` & `roomService.ts` | Đảm bảo kết nối cơ sở dữ liệu SQLite (Drizzle) duy nhất và danh sách quản lý phòng học in-memory (`activeRooms`) hoạt động nhất quán, không xảy ra xung đột tài nguyên. |
+| **Creational** (Khởi tạo) | **Factory Method** | `njs-service/src/controllers/roomController.ts` | Sử dụng `RtcTokenBuilder` của Agora SDK như một Factory tạo các Token bảo mật truy cập kênh thoại một cách tự động và đồng bộ. |
+| **Structural** (Cấu trúc) | **Repository Pattern** | `.NET Service` & `njs-service` (Drizzle ORM) | Che giấu chi tiết truy vấn cơ sở dữ liệu vật lý (SQL raw), cung cấp giao diện lập trình hướng đối tượng (Entity/Schema) sạch cho tầng nghiệp vụ. |
+| **Structural** (Cấu trúc) | **MVC (Model-View-Controller)** | `.NET Service` & `njs-service` | Tổ chức mã nguồn phân tầng rõ rệt: Routes định tuyến, Controllers xử lý logic nghiệp vụ và nhận/trả dữ liệu REST, Frontend đảm nhận tầng View hiển thị. |
 
 ---
 
-## 4. Kiến trúc Hệ thống áp dụng Observer Pattern
+## 3. Chi tiết áp dụng Behavioral Pattern: Observer Pattern
 
-### 4.1. Sơ đồ lớp (Mermaid Diagram)
+### 3.1. Bài toán thực tế
+Mỗi phòng học thoại trong LUCY hoạt động theo thời gian biểu nghiêm ngặt: mỗi 10 phút tự động nâng sub-level (`currentSubLevel++`). Khi có sự kiện chuyển sub-level này xảy ra, hệ thống cần kích hoạt 3 hành động độc lập:
+1. Gửi sự kiện thời gian thực tới tất cả các client học viên trong phòng qua Socket.io để đổi giao diện.
+2. Ghi nhận sub-level và trạng thái phòng mới vào SQLite Database nhằm duy trì trạng thái khi khởi động lại.
+3. Tìm kiếm học liệu tương ứng sub-level mới từ DB, tự động ghim từ vựng cốt lõi lên góc phòng, và phát đi các câu hỏi thảo luận cập nhật.
+
+Nếu viết theo kiểu tuần tự (Procedural), mã nguồn quản lý phòng sẽ phụ thuộc chặt (tight coupling) vào các module Socket, Database, và LMS. Khi muốn thêm tính năng thứ 4 (ví dụ: cộng điểm cho học viên khi qua sub-level mới), lập trình viên bắt buộc phải sửa code của hàm quản lý phòng, tăng nguy cơ lỗi hệ thống.
+
+### 3.2. Sơ đồ lớp (Class Diagram)
 
 ```mermaid
 classDiagram
@@ -106,27 +90,9 @@ classDiagram
     RoomStageSubject --> Observer : notifies
 ```
 
-### 4.2. Nguyên lý hoạt động
+### 3.3. Hiện thực mã nguồn cụ thể (TypeScript)
 
-1. **`RoomStageSubject`**: Là đối tượng đại diện cho việc quản lý tiến trình phòng học. Mỗi phòng học khi được tạo sẽ sở hữu một instance của `RoomStageSubject`, lưu trong Map `activeRooms` (in-memory).
-2. **Đăng ký Observers**: Khi khởi tạo phòng (`createRoomInMemory` trong `roomService.ts`), 3 concrete observers được đăng ký (`attach`) vào subject:
-   - `SocketNotifierObserver` — gửi sự kiện thời gian thực qua Socket.io.
-   - `DbPersistenceObserver` — ghi trạng thái phòng xuống SQLite qua Drizzle ORM.
-   - `MaterialRecommenderObserver` — truy vấn nội dung level mới và tự động ghim tài liệu học tập.
-3. **Kích hoạt tự động/thủ công**:
-   - **Tự động**: Mỗi 10 phút, `setInterval` trong `createRoomInMemory` gọi `transitionToNextSubLevel()`.
-   - **Thủ công**: Host gửi sự kiện `force-stage-transition`, backend gọi `forceNextSublevel()` → `subject.transitionToNextSubLevel()`.
-4. **Phân phát xử lý**: `transitionToNextSubLevel()` tăng `currentSubLevel`, đặt `state = 'Transition'`, rồi gọi `notify('stage-changed', ...)`. Sau 3 giây, đặt `state = 'Active'` và gọi `notify('room-updated', ...)`. Mỗi Observer tự xử lý phần việc của mình:
-   - `SocketNotifierObserver` nhận `stage-changed` → emit `stage-changed` + `room-updated` tới client.
-   - `DbPersistenceObserver` nhận `stage-changed` → cập nhật `currentSubLevel` và `state` trong SQLite.
-   - `MaterialRecommenderObserver` nhận `stage-changed` → query level content mới → auto-pin vocabulary + emit `ai-recommendation-updated`.
-
----
-
-## 5. Minh họa cấu trúc Code triển khai (TypeScript)
-
-### 5.1. Khởi tạo interface của Pattern (`observer.ts`)
-
+**Khởi tạo Interface (`observer.ts`):**
 ```typescript
 export interface Observer {
   update(event: string, data: any): void | Promise<void>;
@@ -139,12 +105,8 @@ export interface Subject {
 }
 ```
 
-### 5.2. Concrete Subject: Quản lý tiến trình phòng học (`observer.ts`)
-
+**Concrete Subject quản lý tiến trình phòng học (`RoomStageSubject`):**
 ```typescript
-import { Observer, Subject } from './observer';
-import { Room } from '../types/index.js';
-
 export class RoomStageSubject implements Subject {
   private observers: Observer[] = [];
   private roomId: string;
@@ -154,9 +116,7 @@ export class RoomStageSubject implements Subject {
   }
 
   attach(observer: Observer): void {
-    if (!this.observers.includes(observer)) {
-      this.observers.push(observer);
-    }
+    if (!this.observers.includes(observer)) this.observers.push(observer);
   }
 
   detach(observer: Observer): void {
@@ -174,7 +134,7 @@ export class RoomStageSubject implements Subject {
   async transitionToNextSubLevel(room: Room): Promise<void> {
     if (room.currentSubLevel < 12) {
       room.currentSubLevel++;
-      room.state = 'Transition';
+      room.state = 'Transition'; // Trạng thái đệm 3s trước khi học tiếp
 
       this.notify('stage-changed', { roomId: this.roomId, room });
 
@@ -187,20 +147,12 @@ export class RoomStageSubject implements Subject {
 }
 ```
 
-### 5.3. Các Concrete Observers phục vụ LMS (`observer.ts`)
-
-**`SocketNotifierObserver`** — Gửi sự kiện WebSocket tới client đang kết nối:
-
+**Các Concrete Observers triển khai nhiệm vụ chuyên biệt:**
+1. `SocketNotifierObserver` - Phát WebSocket:
 ```typescript
-import { Server } from 'socket.io';
-import { Room } from '../types/index.js';
-
 export class SocketNotifierObserver implements Observer {
   private io: Server;
-
-  constructor(io: Server) {
-    this.io = io;
-  }
+  constructor(io: Server) { this.io = io; }
 
   update(event: string, data: { roomId: string; room: Room }): void {
     const { roomId, room } = data;
@@ -210,169 +162,215 @@ export class SocketNotifierObserver implements Observer {
         newSubLevel: room.currentSubLevel,
         levelName: room.levelName,
       });
-      this.io.to(roomId).emit('room-updated', { room });
-    } else if (event === 'room-updated') {
-      this.io.to(roomId).emit('room-updated', { room });
     }
+    this.io.to(roomId).emit('room-updated', { room });
   }
 }
 ```
 
-**`DbPersistenceObserver`** — Đồng bộ trạng thái mới xuống SQLite Database:
-
+2. `DbPersistenceObserver` - Lưu trữ xuống SQLite:
 ```typescript
-import db from '../db/index.js';
-import { rooms } from '../db/schema.js';
-import { and, eq } from 'drizzle-orm';
-
 export class DbPersistenceObserver implements Observer {
   async update(event: string, data: { roomId: string; room: Room }): Promise<void> {
     const { roomId, room } = data;
     if (event === 'stage-changed' || event === 'room-updated') {
-      try {
-        await db.update(rooms)
-          .set({
-            currentSubLevel: room.currentSubLevel,
-            state: room.state,
-          })
-          .where(eq(rooms.id, roomId));
-        console.log(`[DbPersistenceObserver] Persisted room ${roomId} - State: ${room.state}, Sub-level: ${room.currentSubLevel}`);
-      } catch (err) {
-        console.error(`[DbPersistenceObserver] Failed to update SQLite for room ${roomId}:`, err);
-      }
+      await db.update(rooms)
+        .set({ currentSubLevel: room.currentSubLevel, state: room.state })
+        .where(eq(rooms.id, roomId));
     }
   }
 }
 ```
 
-**`MaterialRecommenderObserver`** — Tự động lấy dữ liệu bài học mới từ SQLite và gợi ý tài liệu:
-
+3. `MaterialRecommenderObserver` - Tự động tải học liệu và đổi Pinned Content:
 ```typescript
-import { Server } from 'socket.io';
-import db from '../db/index.js';
-import { rooms, levels } from '../db/schema.js';
-import { and, eq } from 'drizzle-orm';
-import { Room, ContentPin } from '../types/index.js';
-import { v4 as uuidv4 } from 'uuid';
-
 export class MaterialRecommenderObserver implements Observer {
   private io: Server;
-
-  constructor(io: Server) {
-    this.io = io;
-  }
+  constructor(io: Server) { this.io = io; }
 
   async update(event: string, data: { roomId: string; room: Room }): Promise<void> {
     const { roomId, room } = data;
     if (event === 'stage-changed') {
-      try {
-        const [startLevel] = await db.select().from(levels).where(eq(levels.id, room.levelId));
-        if (!startLevel) return;
-
-        const [nextLevel] = await db.select()
-          .from(levels)
-          .where(and(
-            eq(levels.language, startLevel.language),
-            eq(levels.stage, startLevel.stage),
-            eq(levels.subLevel, room.currentSubLevel)
-          ));
-
-        if (nextLevel) {
-          const content = JSON.parse(nextLevel.contentJson);
-
-          // Auto-pin new vocabulary list
-          const pin: ContentPin = {
-            id: uuidv4(),
-            title: `Vocabulary for Sub-level ${room.currentSubLevel}`,
-            url: `Vocab: ${content.vocabulary.join(', ')}`,
-            type: 'vocabulary',
-            pinnedBy: room.hostId,
-            pinnedAt: new Date().toISOString(),
-          };
-
-          room.pinnedContent = pin;
-
-          // Emit updates to clients
-          this.io.to(roomId).emit('pinned-content-updated', { roomId, pin });
-          this.io.to(roomId).emit('ai-recommendation-updated', {
-            roomId,
-            recommendation: {
-              vocabulary: content.vocabulary,
-              conversationPrompts: content.conversationPrompts,
-              grammarTips: content.grammarTips,
-              aiSuggestedQuestions: content.aiSuggestedQuestions,
-              levelName: nextLevel.name,
-              levelId: nextLevel.id,
-            },
-          });
-        }
-      } catch (err) {
-        console.error(`[MaterialRecommenderObserver] Failed to load level recommendations:`, err);
+      const [nextLevel] = await db.select().from(levels).where(and(
+        eq(levels.language, room.language),
+        eq(levels.subLevel, room.currentSubLevel)
+      ));
+      if (nextLevel) {
+        const content = JSON.parse(nextLevel.contentJson);
+        const pin: ContentPin = {
+          id: uuidv4(),
+          title: `Vocabulary for Sub-level ${room.currentSubLevel}`,
+          url: `Vocab: ${content.vocabulary.join(', ')}`,
+          type: 'vocabulary',
+          pinnedBy: room.hostId,
+          pinnedAt: new Date().toISOString()
+        };
+        room.pinnedContent = pin;
+        this.io.to(roomId).emit('pinned-content-updated', { roomId, pin });
+        this.io.to(roomId).emit('ai-recommendation-updated', {
+          roomId,
+          recommendation: { ...content, levelName: nextLevel.name, levelId: nextLevel.id }
+        });
       }
     }
   }
 }
 ```
 
-### 5.4. Đăng ký Observers khi tạo phòng (`roomService.ts` — `createRoomInMemory`)
-
+**Đăng ký và chạy tự động trong `roomService.ts`:**
 ```typescript
-import { RoomStageSubject, SocketNotifierObserver, DbPersistenceObserver, MaterialRecommenderObserver } from './observer.js';
+const subject = new RoomStageSubject(roomId);
+subject.attach(new SocketNotifierObserver(ioInstance));
+subject.attach(new DbPersistenceObserver());
+subject.attach(new MaterialRecommenderObserver(ioInstance));
 
-export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 'pinnedContent' | 'participantCount'>): string {
-  const id = uuidv4();
-  const fullRoom: Room = {
-    ...roomData,
-    id,
-    participants: [],
-    pinnedContent: null,
-    participantCount: 0,
-    createdAt: new Date().toISOString(),
-  };
-
-  // Tạo Subject và đăng ký 3 Observers
-  const subject = new RoomStageSubject(id);
-  subject.attach(new SocketNotifierObserver(ioInstance));
-  subject.attach(new DbPersistenceObserver());
-  subject.attach(new MaterialRecommenderObserver(ioInstance));
-
-  // Timer tự động chuyển Stage mỗi 10 phút
-  const stageTimer = setInterval(async () => {
-    const rd = activeRooms.get(id);
-    if (!rd || rd.room.state === RoomState.CLOSED) {
-      clearInterval(stageTimer);
-      return;
-    }
-    await rd.subject?.transitionToNextSubLevel(rd.room);
-  }, 10 * 60 * 1000);
-
-  activeRooms.set(id, { room: fullRoom, stageTimer, subject, handQueue: [] });
-  return id;
-}
+const stageTimer = setInterval(async () => {
+  await subject.transitionToNextSubLevel(room);
+}, 10 * 60 * 1000);
 ```
+
+### 3.4. Áp dụng Pub-Sub/Observer trên Frontend (Zustand Store)
+Ở Frontend, các React component không trực tiếp gọi API hay lắng nghe Socket thô. Thay vào đó, nền tảng sử dụng **Zustand** để triển khai mô hình **Publish-Subscribe**.
+* Cửa hàng trạng thái `useRoomStore` đóng vai trò là nơi lưu trữ tập trung.
+* Khi có sự kiện `pinned-content-updated` hay `ai-recommendation-updated` từ socket, Store sẽ cập nhật dữ liệu.
+* Các component giao diện (`AgoraRoom`, `SpeakingRoomPage`) đóng vai trò là các subscriber đăng ký lắng nghe thay đổi của store. Khi store phát đi thông báo thay đổi, các component này tự động kết xuất lại (re-render) để cập nhật giao diện mà không cần can thiệp thủ công.
 
 ---
 
-## 6. Đánh giá tính hiệu quả thực tế
+## 4. Chi tiết áp dụng Behavioral Pattern: Strategy Pattern (AI Recommendation Engine)
 
-Việc áp dụng **Observer Pattern** mang lại các cải tiến kiến trúc vượt trội so với phiên bản viết procedural/ tightly-coupled:
+### 4.1. Bài toán thực tế
+Nhằm mục đích tối ưu hóa việc học, hệ thống LUCY cho phép Host ghim (pin) các tài liệu học tập tùy chọn (như file `.txt`, `.docx`, `.pdf`, hoặc một từ vựng, đường dẫn tài liệu). Khi tài liệu được ghim, AI Recommender cần đưa ra các gợi ý:
+* 4-6 từ vựng/cụm từ liên quan kèm phiên âm/nghĩa tiếng Việt.
+* 2-3 cấu trúc ngữ pháp có thể áp dụng.
+* 3-4 chủ đề thảo luận nhóm.
+* 3-4 câu hỏi luyện nói tương tác.
 
-1. **Tuân thủ chặt chẽ Nguyên lý Single Responsibility (SRP):**
-   - `RoomStageSubject` chỉ quản lý việc thông báo sự kiện, không biết Observer nào đang lắng nghe hay chúng làm gì.
-   - Mỗi Observer chỉ làm đúng một việc: gửi socket, ghi DB, hoặc gợi ý học liệu.
-   - `roomService.ts` chỉ phụ trách routing sự kiện Socket, không chứa logic nghiệp vụ chuyển Stage.
+Yêu cầu đặt ra là hệ thống phải hỗ trợ gọi API trực tiếp tới mô hình ngôn ngữ lớn tiên tiến (Google Gemini 2.5 Flash) để phân tích tài liệu chuyên sâu. Tuy nhiên, khi hệ thống chạy trong môi trường cục bộ (Offline), không có API Key, hoặc API bị giới hạn lưu lượng, hệ thống vẫn phải hoạt động bình thường bằng một giải pháp thay thế nội bộ thông minh dựa trên bộ quy tắc từ khóa (Keyword-based mapping).
 
-2. **Mở rộng dễ dàng (Open/Closed Principle - OCP):**
-   - Nếu trong tương lai cần thêm tính năng "Tặng xu thưởng khi vượt cấp", chỉ cần tạo `RewardObserver` implements `Observer` và `subject.attach(new RewardObserver(...))`. Không cần sửa đổi bất kỳ dòng code của `RoomStageSubject` hay các Observer hiện có.
+### 4.2. Giải pháp áp dụng Strategy Pattern
+Strategy Pattern được sử dụng để đóng gói hai chiến lược sinh gợi ý học liệu khác nhau:
+1. **GeminiApiStrategy:** Thực hiện gọi HTTP POST đến API của Google Gemini, gửi kèm nội dung/tiêu đề của tài liệu để AI sinh cấu trúc dữ liệu JSON chính xác.
+2. **LocalSmartRulesStrategy:** Thực hiện bóc tách từ khóa trong tiêu đề/mô tả tài liệu để tìm kiếm chủ đề tương đồng (Travel, Business, Food, Shopping, Daily Life) trong cơ sở dữ liệu mẫu đa ngôn ngữ (EN, ZH, JA) được dịch nghĩa chi tiết sang tiếng Việt.
 
-3. **Hỗ trợ tối ưu cho kiểm thử (Testability):**
-   - Có thể mock `Observer` và kiểm tra xem `RoomStageSubject.notify()` có gọi đúng số observer và đúng event name hay không.
-   - Có thể test từng Observer độc lập: giả lập `data` và kiểm tra kết quả emit/DB update mà không cần server thật.
+Tầng nghiệp vụ gọi hàm (`generateRecommendationsFromPin`) không cần quan tâm chiến lược nào đang được thực hiện. Nó chỉ cần truyền tài liệu vào và nhận kết quả đầu ra. Việc chuyển đổi giữa các chiến lược được quyết định động thông qua sự tồn tại của cấu hình biến môi trường `GEMINI_API_KEY`.
 
-4. **Loose Coupling thực tế:**
-   - `RoomStageSubject` phụ thuộc vào interface `Observer`, không phụ thuộc vào concrete class.
-   - Các Observer có thể được thêm/bớt linh hoạt mà không ảnh hưởng đến Subject.
-   - `MaterialRecommenderObserver` và `DbPersistenceObserver` là `async`, trong khi `SocketNotifierObserver` là sync — `notify()` xử lý cả hai loại nhờ `Promise.resolve()`, minh họa tính linh hoạt của interface.
+### 4.3. Hiện thực mã nguồn cụ thể (`aiService.ts`)
 
-5. **Xử lý lỗi tập trung:**
-   - `notify()` wrapped mỗi `observer.update()` trong `Promise.resolve().catch()`, đảm bảo một Observer lỗi không làm crash toàn bộ chuỗi thông báo.
+```typescript
+export async function generateRecommendationsFromPin(pin: ContentPin, language: Language): Promise<AiRecommendation> {
+  const context = await getPinTextContext(pin);
+  const geminiKey = process.env.GEMINI_API_KEY;
+
+  // Chiến lược 1: Gọi API Gemini nếu có API Key cấu hình
+  if (geminiKey) {
+    try {
+      const prompt = `Based on this pinned document:\n${context}...\nReturn a JSON object containing vocabulary, grammarTips, conversationPrompts, aiSuggestedQuestions...`;
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.7 }
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) return JSON.parse(text) as AiRecommendation;
+      }
+    } catch (err) {
+      console.error('[aiService] Failed to generate via Gemini, falling back to smart local rules:', err);
+    }
+  }
+
+  // Chiến lược 2 (Fallback): Sử dụng bộ quy tắc từ khóa cục bộ
+  return generateFallbackRecommendations(pin, language);
+}
+```
+
+Chiến lược 2 (`generateFallbackRecommendations`) hoạt động dựa trên các bộ dữ liệu mẫu khổng lồ được xây dựng sẵn trong mã nguồn. Ví dụ, nếu tiêu đề ghim chứa các từ khóa liên quan đến du lịch như `travel`, `flight`, `hotel`, hệ thống sẽ trả về bộ từ vựng và câu hỏi về chủ đề du lịch phù hợp với ngôn ngữ của phòng học (tiếng Anh, Trung hoặc Nhật).
+
+---
+
+## 5. Chi tiết áp dụng Creational Patterns
+
+### 5.1. Singleton Pattern
+**Mục đích:** Hạn chế việc tạo ra nhiều thực thể cho cùng một tài nguyên dùng chung, ngăn chặn rò rỉ bộ nhớ, xung đột truy cập ghi file đồng thời trên SQLite, và đảm bảo tính nhất quán dữ liệu.
+* **Database Connection Singleton (`db/index.ts`):** 
+  Khởi tạo kết nối duy nhất đến file SQLite thông qua `better-sqlite3` và xuất ra instance `db` dùng chung cho toàn bộ ứng dụng:
+  ```typescript
+  const sqlite = new Database(dbPath);
+  sqlite.pragma('journal_mode = WAL'); // Bật tính năng ghi nhật ký WAL tối ưu hóa hiệu suất
+  export const db = drizzle(sqlite, { schema });
+  export default db;
+  ```
+* **Active Room Memory Registry (`roomService.ts`):** 
+  Sử dụng một thực thể Map duy nhất `activeRooms` để theo dõi toàn bộ trạng thái in-memory của các phòng chat đang hoạt động:
+  ```typescript
+  const activeRooms = new Map<string, {
+    room: Room;
+    stageTimer?: NodeJS.Timeout;
+    subject?: RoomStageSubject;
+  }>();
+  ```
+  Tất cả các luồng xử lý socket kết nối đều truy xuất đến Map Singleton này để đảm bảo đồng bộ hóa.
+
+### 5.2. Factory Method Pattern
+**Mục đích:** Đóng gói quá trình khởi tạo các đối tượng phức tạp có các tham số bảo mật thay đổi theo thời gian thực.
+* **Agora Access Token Generator:**
+  Khi một học viên hoặc khách truy cập tham gia vào kênh âm thanh, hệ thống cần cấp một token thoại có thời hạn sử dụng. Nền tảng sử dụng Factory `RtcTokenBuilder.buildTokenWithUid` của SDK Agora để sinh token:
+  ```typescript
+  const token = RtcTokenBuilder.buildTokenWithUid(
+    appId,
+    appCredential,
+    channelName,
+    uid,
+    RtcRole.PUBLISHER,
+    expireSec,
+    expireSec
+  );
+  ```
+  Hàm này che giấu toàn bộ logic mã hóa chữ ký HMAC-SHA1 phức tạp của Agora.
+* **Avatars Persona Generator:**
+  LUCY áp dụng thiết kế ẩn danh bằng cách sinh ngẫu nhiên 5 kiểu dải màu gradient cho các tài khoản đăng ký mới hoặc tài khoản khách (Guest). Quá trình ánh xạ gradient này được đóng gói trong một file hằng số đóng vai trò là một Factory ánh xạ đơn giản từ ID màu sang class CSS Tailwind (`PERSONA_GRADIENTS`).
+
+---
+
+## 6. Chi tiết áp dụng Structural Patterns: Repository Pattern & MVC
+
+### 6.1. Repository Pattern (Drizzle ORM & EF Core)
+Cả hai dịch vụ Node.js và .NET đều áp dụng **Repository Pattern** thông qua các ORM hiện đại (Drizzle và Entity Framework Core).
+* Lập trình viên không trực tiếp viết mã SQL thuần như `SELECT * FROM rooms WHERE id = ...`.
+* Thay vào đó, việc tương tác với DB được thực hiện qua các thực thể (entities):
+  ```typescript
+  // Node.js Drizzle ORM
+  await db.select().from(rooms).where(eq(rooms.id, roomId));
+  ```
+  ```csharp
+  // .NET EF Core
+  var user = await db.Users.FirstOrDefaultAsync(u => u.Email == req.Email);
+  ```
+Thiết kế này giúp tách biệt hoàn toàn Tầng Nghiệp vụ (Business Logic) khỏi Tầng Truy cập Dữ liệu (Data Access Layer), giúp dễ dàng thay thế hệ quản trị cơ sở dữ liệu (ví dụ chuyển từ SQLite sang PostgreSQL) mà không phải viết lại code nghiệp vụ.
+
+### 6.2. MVC (Model-View-Controller)
+Dự án áp dụng chặt chẽ mô hình kiến trúc phân tầng MVC:
+* **Model:** Định nghĩa cấu trúc dữ liệu (`db/schema.ts` trong Node.js và thư mục `Models/` trong .NET).
+* **View:** Đảm nhận bởi React Single Page Application ở Frontend. Nhận dữ liệu JSON từ API và render thành giao diện Cyberpunk rực rỡ, sử dụng TailwindCSS và Framer Motion.
+* **Controller:** Các Controller (`AuthController.cs`, `UsersController.cs` ở .NET và `roomController.ts`, `levelController.ts` ở Node.js) nhận request HTTP, kiểm tra hợp lệ, gọi tầng nghiệp vụ để thực hiện xử lý dữ liệu và trả về JSON thuần cho View.
+
+---
+
+## 7. Đánh giá hiệu quả kiến trúc thực tế
+
+Việc áp dụng đồng bộ các Design Patterns kể trên đã mang lại các cải tiến kỹ thuật rõ rệt cho dự án LUCY:
+
+1. **Tuân thủ Nguyên lý Đơn nhiệm (SRP - Single Responsibility Principle):**
+   Mỗi class chỉ giải quyết một mối quan tâm duy nhất. `RoomStageSubject` chịu trách nhiệm kích hoạt thời gian chuyển sub-level, trong khi các Observers lo liệu việc gửi thông báo, ghi database hoặc gợi ý tài liệu học. Việc thêm bớt chức năng không làm ảnh hưởng đến các thành phần khác.
+2. **Mở rộng dễ dàng (OCP - Open/Closed Principle):**
+   Strategy Pattern cho phép cấu hình linh hoạt cách thức sinh câu hỏi/tài liệu của AI mà không cần viết lại logic ghim tài liệu. Observer Pattern cho phép dễ dàng cắm thêm các tính năng phân tích kết thúc phòng học, trao quà tự động bằng cách viết thêm class Observer mới và gọi hàm `attach()`.
+3. **Nâng cao khả năng kiểm thử (Testability):**
+   Việc tách biệt các Strategy và Observers giúp viết các bộ kiểm thử đơn vị (Unit Tests) vô cùng dễ dàng. Chúng ta có thể kiểm thử độc lập logic sinh từ khóa của Strategy ngoại tuyến hoặc kiểm thử giả lập các sự kiện thay đổi database mà không cần chạy máy chủ Socket thực tế.
+4. **Giảm thiểu liên kết (Loose Coupling):**
+   Tầng giao tiếp Socket, Database, và API AI được kết nối với lõi hệ thống thông qua các Interface trừu tượng. Việc thay đổi thư viện Socket, cập nhật cơ sở dữ liệu hay nâng cấp phiên bản mô hình AI (từ Gemini sang GPT) có thể được thực hiện độc lập, giúp dự án duy trì được tốc độ phát triển nhanh và khả năng bảo trì bền vững.
