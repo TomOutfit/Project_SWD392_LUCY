@@ -6,6 +6,7 @@ import { RoomStageSubject, SocketNotifierObserver, DbPersistenceObserver, Materi
 import db from '../db/index.js';
 import { levels, rooms as roomsTable, podcasts } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
+import { generateRecommendationsFromPin } from './aiService.js';
 
 // In-memory room state (production: use Redis)
 const activeRooms = new Map<string, {
@@ -133,7 +134,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     io.to(roomId).emit('room-updated', { room: roomData.room });
   });
 
-  socket.on('pin-content', ({ roomId, content }) => {
+  socket.on('pin-content', async ({ roomId, content }) => {
     const roomData = activeRooms.get(roomId);
     if (!roomData || roomData.room.hostId !== socket.data.userId) return;
 
@@ -144,6 +145,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     roomData.room.pinnedContent = pin;
 
     io.to(roomId).emit('pinned-content-updated', { roomId, pin });
+    await fetchAndEmitRecommendations(io, roomId, roomData.room);
   });
 
   socket.on('start-recording', ({ roomId }) => {
@@ -307,6 +309,23 @@ export async function forceNextSublevel(roomId: string): Promise<boolean> {
 
 async function fetchAndEmitRecommendations(io: Server, roomId: string, room: Room) {
   try {
+    if (room.pinnedContent) {
+      console.log(`[roomService] Pinned content detected, generating AI recommendations based on: ${room.pinnedContent.title}`);
+      const recommendation = await generateRecommendationsFromPin(room.pinnedContent, room.language);
+      io.to(roomId).emit('ai-recommendation-updated', {
+        roomId,
+        recommendation: {
+          vocabulary: recommendation.vocabulary,
+          conversationPrompts: recommendation.conversationPrompts,
+          grammarTips: recommendation.grammarTips,
+          aiSuggestedQuestions: recommendation.aiSuggestedQuestions,
+          levelName: room.levelName,
+          levelId: room.levelId,
+        }
+      });
+      return;
+    }
+
     const [startLevel] = await db.select().from(levels).where(eq(levels.id, room.levelId));
     if (!startLevel) return;
 

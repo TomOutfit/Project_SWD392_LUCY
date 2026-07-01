@@ -263,6 +263,29 @@ export function AgoraRoom() {
                 ))}
               </ul>
             </div>
+
+            {/* Suggested Questions */}
+            {recommendation.aiSuggestedQuestions && recommendation.aiSuggestedQuestions.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold text-mist uppercase tracking-wider mb-1.5">Suggested Questions</p>
+                <ul className="space-y-1.5">
+                  {recommendation.aiSuggestedQuestions.map((question, idx) => (
+                    <li key={idx} className="group relative p-2 rounded bg-navy/50 border border-ghost/40 text-[11px] text-mist flex items-start justify-between gap-1.5">
+                      <span className="flex-1">{question}</span>
+                      {isHost && (
+                        <button
+                          onClick={() => pinContent(`Suggested Question`, question, 'conversation')}
+                          className="opacity-0 group-hover:opacity-100 text-cyan hover:text-pulse transition-all flex-shrink-0"
+                          title="Pin this question"
+                        >
+                          <Pin className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
