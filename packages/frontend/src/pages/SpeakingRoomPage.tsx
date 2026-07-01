@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mic2, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { Mic2, Volume2, VolumeX, Loader2, Info } from 'lucide-react';
 import { AgoraRoom } from '@/components/AgoraRoom';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -111,66 +111,82 @@ export default function SpeakingRoomPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4 text-center text-mist">
+      <div className="min-h-screen relative overflow-hidden bg-[#0B0B1A] flex items-center justify-center p-4">
+        {/* Background Mesh Glow */}
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-20">
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+          <div className="absolute top-[20%] left-[20%] w-[50%] h-[50%] bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.12),transparent_50%)] blur-[90px]" />
+        </div>
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-xl glass rounded-3xl p-8 w-full space-y-6"
+          className="relative z-10 max-w-md glass rounded-3xl p-8 w-full border border-ghost shadow-[0_0_30px_rgba(0,245,255,0.05)] text-center space-y-6"
         >
-          <h2 className="font-orbitron text-2xl text-white mb-3">
-            {joiningRoomId ? 'Joining your Speaking room...' : 'Connecting to Speaking Room...'}
-          </h2>
+          <div className="mx-auto w-12 h-12 rounded-xl bg-cyan/10 border border-cyan/30 flex items-center justify-center mb-2">
+            <Loader2 className="w-6 h-6 text-cyan animate-spin" />
+          </div>
+
+          <div>
+            <h2 className="font-orbitron font-black text-xl text-[#F0F4FF] tracking-wider mb-2">
+              {joiningRoomId ? 'JOINING SPEAKING LOBBY...' : 'CONNECTING TO SERVER...'}
+            </h2>
+            <p className="text-xs text-mist font-inter">
+              Establishing a low-latency connection with our voice servers.
+            </p>
+          </div>
 
           {/* Mic test panel */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Mic2 className="w-4 h-4 text-cyan" />
-              <span className="text-sm font-medium text-[#F0F4FF]">Test your microphone</span>
+          <div className="p-4 rounded-2xl bg-navy/60 border border-ghost/65 text-left space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mic2 className="w-4 h-4 text-cyan" />
+                <span className="text-xs font-exo font-bold text-[#F0F4FF] uppercase tracking-wider">Test Microphone</span>
+              </div>
+              {micTestActive && <span className="text-[10px] text-pulse font-mono uppercase tracking-widest animate-pulse">Live</span>}
             </div>
 
-            <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-navy border border-ghost">
-              <div className="flex-1 h-3 bg-midnight rounded-full overflow-hidden">
+            <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-[#0c0c1e] border border-ghost/45">
+              <div className="flex-1 h-3 bg-midnight rounded-full overflow-hidden border border-ghost/20 relative">
                 <div
                   ref={volumeBarRef}
-                  className="h-full bg-cyan rounded-full transition-all duration-75"
+                  className="h-full bg-gradient-to-r from-cyan to-violet rounded-full transition-all duration-75"
                   style={{ width: '0%' }}
                 />
               </div>
               <button
                 onClick={() => setMicTestActive(prev => !prev)}
-                className={`p-2 rounded-lg border transition-all ${
+                className={`p-2 rounded-lg border transition-all duration-300 ${
                   micTestActive
-                    ? 'bg-cyan/20 border-cyan text-cyan'
-                    : 'bg-midnight border-ghost text-mist hover:border-violet/50'
+                    ? 'bg-cyan/15 border-cyan text-cyan'
+                    : 'bg-navy border-ghost text-mist hover:border-violet/50'
                 }`}
                 title={micTestActive ? 'Stop mic test' : 'Start mic test'}
               >
-                {micTestActive ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {micTestActive ? <Volume2 className="w-4.5 h-4.5" /> : <VolumeX className="w-4.5 h-4.5" />}
               </button>
             </div>
 
-            {micTestActive && (
-              <p className="text-xs text-cyan/80">
-                Speak into your microphone to test — you should see the level bar move
-              </p>
-            )}
-            {!micTestActive && (
-              <p className="text-xs text-mist">
-                Click the speaker icon to test your microphone before joining
-              </p>
-            )}
+            <div className="flex gap-2 items-start text-[10px] text-mist font-inter leading-relaxed">
+              <Info className="w-3.5 h-3.5 text-cyan flex-shrink-0 mt-0.5" />
+              <span>
+                {micTestActive
+                  ? 'Speak to verify input level. Use headphones to prevent echo.'
+                  : 'Click the speaker button on the right to test microphone before entering.'}
+              </span>
+            </div>
           </div>
 
-          {/* Agora join spinner */}
+          {/* Agora status information */}
           {(agoraJoining || (!agoraJoined && !agoraFailed && isConnected)) && (
-            <div className="flex items-center justify-center gap-2 text-sm text-mist">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Joining Agora channel...</span>
+            <div className="flex items-center justify-center gap-2 text-xs text-cyan font-exo font-semibold">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Authorizing RTC Agora Credentials...</span>
             </div>
           )}
 
-          <p className="text-sm text-mist">
-            {joiningRoomId ? 'Please wait while we connect you to the room.' : 'Please wait a moment while we connect to the server.'}
+          <p className="text-xs text-mist/60 font-mono">
+            {joiningRoomId ? 'Connecting channel token...' : 'Waiting for socket response...'}
           </p>
         </motion.div>
       </div>
