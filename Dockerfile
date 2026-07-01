@@ -82,4 +82,4 @@ EXPOSE 80
 # Optional: mount a volume for persistent SQLite data & uploads
 VOLUME ["/app/njs/data", "/app/njs/uploads"]
 
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["sh", "-c", "sed -i \"s/listen 80;/listen ${PORT:-80};/g\" /etc/nginx/nginx.conf && exec /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf"]
