@@ -6,23 +6,23 @@ on:
   pull_request:
     branches: [main]
 
-# Least-privilege permissions
 permissions:
   contents: read
-  packages: write   # allows push to GitHub Container Registry (GHCR)
+  packages: write   # push to GHCR
 
 env:
   REGISTRY: ghcr.io
-  # Image name = ghcr.io/<owner>/<repo>  (all lowercase, auto-set by GitHub)
-  IMAGE_NAME: ${{ github.repository }}
+  # Full-stack image (Frontend + NJS + NET via nginx)
+  IMAGE_ALL: ${{ github.repository }}
+  # Standalone .NET image (for Vercel frontend → Render backend)
+  IMAGE_NET: ${{ github.repository }}-net
 
 # ─────────────────────────────────────────────────────────────────
-# Job 1 — Build & push Docker image to GHCR
-# Runs on every push to main AND on every PR (push=false on PR)
+# Job 1a — Build full-stack Docker image (Frontend + NJS + NET)
 # ─────────────────────────────────────────────────────────────────
 jobs:
-  build:
-    name: 🐳 Build Docker Image
+  build-all:
+    name: 🐳 Build Full-Stack Image
     runs-on: ubuntu-latest
 
     outputs:
@@ -32,12 +32,10 @@ jobs:
       - name: ⬇️  Checkout code
         uses: actions/checkout@v4
 
-      # Buildx enables layer caching (speeds up subsequent builds a lot)
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 🔑 Log in to GitHub Container Registry
-        # Only login when we're on main (PRs from forks can't access secrets)
+      - name: 🔑 Log in to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
@@ -45,63 +43,115 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Generate Docker tags:
-      #   latest           ← always on main
-      #   sha-<short-sha>  ← unique per commit (useful for rollback)
-      - name: 🏷️  Extract image metadata
+      - name: 🏷️  Extract metadata (full-stack)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_ALL }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
 
-      - name: 🏗️  Build (and push on main)
+      - name: 🏗️  Build full-stack (push on main)
         uses: docker/build-push-action@v6
         with:
           context: .
-          # Only push the image when merging to main; PRs just validate the build
+          file: Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Pass Agora App ID as a build-time arg (baked into the React bundle)
           build-args: |
             VITE_AGORA_APP_ID=${{ secrets.VITE_AGORA_APP_ID }}
-          # GitHub Actions cache → dramatically faster rebuilds
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=full-stack
+          cache-to: type=gha,mode=max,scope=full-stack
 
 # ─────────────────────────────────────────────────────────────────
-# Job 2 — Trigger Render redeploy
-# Runs only after a successful build on main
+# Job 1b — Build standalone .NET image (for Vercel frontend)
+# Runs in PARALLEL with build-all to save time
+# ─────────────────────────────────────────────────────────────────
+  build-net:
+    name: 🔷 Build .NET-Only Image
+    runs-on: ubuntu-latest
+
+    outputs:
+      image-tag: ${{ steps.meta-net.outputs.version }}
+
+    steps:
+      - name: ⬇️  Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️  Extract metadata (.NET only)
+        id: meta-net
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NET }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+
+      - name: 🏗️  Build .NET-only (push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.netonly
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta-net.outputs.tags }}
+          labels: ${{ steps.meta-net.outputs.labels }}
+          cache-from: type=gha,scope=net-only
+          cache-to: type=gha,mode=max,scope=net-only
+
+# ─────────────────────────────────────────────────────────────────
+# Job 2 — Trigger Render redeploy (both services)
+# Runs only after BOTH builds succeed on main
 # ─────────────────────────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy to Render
     runs-on: ubuntu-latest
-    needs: build
-    # Only deploy on push to main (not on PRs)
+    needs: [build-all, build-net]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - name: 📡 Trigger Render Deploy Hook
+      # ── Deploy full-stack container ────────────────────────────
+      - name: 📡 Trigger Render — Full-Stack Service
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "⚠️  RENDER_DEPLOY_HOOK_URL secret is not set — skipping deploy trigger."
-            echo ""
-            echo "   To enable auto-deploy:"
-            echo "   1. Create a Web Service on Render pointing to:"
-            echo "      ghcr.io/${{ env.IMAGE_NAME }}:latest"
-            echo "   2. Copy the Deploy Hook URL from Render → Settings → Deploy Hook"
-            echo "   3. Add it as RENDER_DEPLOY_HOOK_URL in:"
-            echo "      GitHub repo → Settings → Secrets → Actions"
+            echo "⚠️  RENDER_DEPLOY_HOOK_URL not set — skipping full-stack deploy."
+            echo "   Set it in: GitHub repo → Settings → Secrets → Actions"
             exit 0
           fi
+          echo "🚀 Triggering Render redeploy (full-stack)..."
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" --fail "$RENDER_DEPLOY_HOOK_URL")
+          echo "✅ Render responded HTTP $HTTP"
 
-          echo "🚀 Triggering Render redeploy..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --fail "$RENDER_DEPLOY_HOOK_URL")
-          echo "✅ Render responded with HTTP $HTTP_STATUS"
-          echo "   Image: ghcr.io/${{ env.IMAGE_NAME }}:latest"
+      # ── Deploy standalone .NET container (serves Vercel frontend) ─
+      - name: 📡 Trigger Render — .NET Service (for Vercel)
+        env:
+          RENDER_NET_DEPLOY_HOOK_URL: ${{ secrets.RENDER_NET_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_NET_DEPLOY_HOOK_URL" ]; then
+            echo "⚠️  RENDER_NET_DEPLOY_HOOK_URL not set — skipping .NET deploy."
+            echo "   Steps to enable:"
+            echo "   1. Render → New Web Service → Docker image:"
+            echo "      ghcr.io/${{ env.IMAGE_NET }}:latest"
+            echo "   2. Copy Deploy Hook URL → GitHub Secrets → RENDER_NET_DEPLOY_HOOK_URL"
+            echo "   3. Set VITE_API_URL=https://<your-net-service>.onrender.com in Vercel"
+            exit 0
+          fi
+          echo "🚀 Triggering Render redeploy (.NET service)..."
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" --fail "$RENDER_NET_DEPLOY_HOOK_URL")
+          echo "✅ Render responded HTTP $HTTP"
+          echo "   Image: ghcr.io/${{ env.IMAGE_NET }}:latest"
           echo "   Commit: ${{ github.sha }}"

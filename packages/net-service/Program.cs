@@ -106,10 +106,17 @@ app.MapControllers();
 
 Console.WriteLine("\n🔐 LUCY .NET Identity & Payment Service");
 
-// Respect ASPNETCORE_URLS env var (set by supervisord / Railway / Render).
-// Falls back to localhost:5001 for local development.
-var listenUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5001";
-Console.WriteLine($"📄 Swagger UI: {listenUrl}/swagger\n");
+// Priority order for listen URL:
+//   1. ASPNETCORE_URLS (supervisord sets this in all-in-one Docker)
+//   2. PORT (Render injects this — must bind on 0.0.0.0, not localhost)
+//   3. Fallback: localhost:5001 for local dev
+var listenUrl =
+    Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+    ?? (Environment.GetEnvironmentVariable("PORT") is string port
+        ? $"http://0.0.0.0:{port}"
+        : "http://localhost:5001");
+
+Console.WriteLine($"📄 Listening on: {listenUrl}\n");
 app.Run(listenUrl);
 
 public class SampleAccountConfig
