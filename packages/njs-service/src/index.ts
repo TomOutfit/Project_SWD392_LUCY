@@ -179,13 +179,14 @@ app.post('/api/rooms', async (req: Request, res: Response) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, async () => {
+// Bind to 127.0.0.1 so it's loopback only (hidden from Render port detector)
+httpServer.listen(Number(PORT), '127.0.0.1', async () => {
   // Clear ghost rooms from previous dev sessions
   try {
     await db.update(rooms).set({ isLive: false });
   } catch (e) {}
 
-  console.log(`\n🎙️  LUCY Node.js Service running on http://localhost:${PORT}`);
+  console.log(`\n🎙️  LUCY Node.js Service running on http://127.0.0.1:${PORT}`);
   console.log(`📡 Socket.io ready for real-time connections`);
   console.log(`📚 100 levels seeded in SQLite database\n`);
 });
