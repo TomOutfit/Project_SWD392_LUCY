@@ -172,7 +172,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     const existing = get().socket;
     if (existing?.connected) return;
 
-    const njsUrl = (import.meta.env.VITE_NJS_URL as string | undefined) || 'http://localhost:3001';
+    // In production (Docker): VITE_NJS_URL is unset → connect to same origin
+    // nginx proxies /socket.io/ to internal NJS service on port 3001
+    const njsUrl = (import.meta.env.VITE_NJS_URL as string | undefined)
+      || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const socket = io(njsUrl, {

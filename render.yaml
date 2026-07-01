@@ -1,0 +1,58 @@
+# render.yaml — Render Infrastructure as Code
+# Docs: https://render.com/docs/render-yaml-spec
+#
+# Deploy steps:
+#   1. In Render dashboard → New → Web Service → "Deploy an existing Docker image"
+#   2. Set image: ghcr.io/<your-github-username>/<repo-name>:latest
+#   3. Set the env vars listed below (in Render dashboard or here with value: from_secret)
+#   4. Copy the "Deploy Hook" URL from Render → add as RENDER_DEPLOY_HOOK_URL in GitHub Secrets
+
+services:
+  - type: web
+    name: lucy-app
+    runtime: docker
+    # Pull the image we push from GitHub Actions
+    image:
+      url: ghcr.io/TomOutfit/project_swd392_lucy:latest
+    # Render needs credentials to pull from GHCR (private packages)
+    # Add GHCR_USERNAME and GHCR_TOKEN (a GitHub Personal Access Token with read:packages)
+    # in Render dashboard → Environment → Secret Files or env vars.
+
+    plan: free          # upgrade to "starter" for persistent disk
+    region: singapore   # closest to Vietnam
+
+    # Port that nginx listens on (matches EXPOSE 80 in Dockerfile)
+    port: 80
+
+    # Health check — Render uses this to know the container is ready
+    healthCheckPath: /health
+
+    # ── Runtime environment variables ──────────────────────────────
+    # These are injected at runtime (NOT baked into the image).
+    # Set sensitive values in the Render dashboard, not here.
+    envVars:
+      # .NET JWT signing key
+      - key: JWT_KEY
+        sync: false           # fill in Render dashboard
+
+      # Agora credentials (for the NJS service at runtime)
+      - key: AGORA_APP_ID
+        value: c309f46a6f23498a8f8bec6dd3f17fb8
+
+      - key: AGORA_APP_CREDENTIAL
+        sync: false           # fill in Render dashboard
+
+      # supervisord passes these to the dotnet and nodejs processes
+      - key: ASPNETCORE_URLS
+        value: http://localhost:5001
+
+      - key: NODE_ENV
+        value: production
+
+    # ── Persistent disk (SQLite + uploaded audio files) ────────────
+    # Free plan does NOT support disks. Upgrade to "starter" ($7/mo)
+    # or accept that data resets on each deploy.
+    # disk:
+    #   name: lucy-data
+    #   mountPath: /app/njs/data
+    #   sizeGB: 1

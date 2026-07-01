@@ -1,0 +1,102 @@
+name: 🚀 Build & Deploy LUCY
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least-privilege permissions
+permissions:
+  contents: read
+  packages: write   # allows push to GitHub Container Registry (GHCR)
+
+env:
+  REGISTRY: ghcr.io
+  # Image name = ghcr.io/<owner>/<repo>  (all lowercase, auto-set by GitHub)
+  IMAGE_NAME: ${{ github.repository }}
+
+# ─────────────────────────────────────────────────────────────────
+# Job 1 — Build & push Docker image to GHCR
+# Runs on every push to main AND on every PR (push=false on PR)
+# ─────────────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: 🐳 Build Docker Image
+    runs-on: ubuntu-latest
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: ⬇️  Checkout code
+        uses: actions/checkout@v4
+
+      # Buildx enables layer caching (speeds up subsequent builds a lot)
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Log in to GitHub Container Registry
+        # Only login when we're on main (PRs from forks can't access secrets)
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate Docker tags:
+      #   latest           ← always on main
+      #   sha-<short-sha>  ← unique per commit (useful for rollback)
+      - name: 🏷️  Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+
+      - name: 🏗️  Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Only push the image when merging to main; PRs just validate the build
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pass Agora App ID as a build-time arg (baked into the React bundle)
+          build-args: |
+            VITE_AGORA_APP_ID=${{ secrets.VITE_AGORA_APP_ID }}
+          # GitHub Actions cache → dramatically faster rebuilds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+# ─────────────────────────────────────────────────────────────────
+# Job 2 — Trigger Render redeploy
+# Runs only after a successful build on main
+# ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy to Render
+    runs-on: ubuntu-latest
+    needs: build
+    # Only deploy on push to main (not on PRs)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 📡 Trigger Render Deploy Hook
+        # Render re-pulls the :latest image from GHCR and redeploys.
+        # Add RENDER_DEPLOY_HOOK_URL to your GitHub repo Secrets.
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" \
+            --fail \
+            "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+        # Exit non-zero if the HTTP status is not 2xx
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+
+      - name: ✅ Deployment triggered
+        run: |
+          echo "Render deployment triggered successfully."
+          echo "Image: ghcr.io/${{ env.IMAGE_NAME }}:latest"
+          echo "Commit: ${{ github.sha }}"

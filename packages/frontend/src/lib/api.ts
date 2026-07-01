@@ -58,8 +58,10 @@ export const walletApi = {
 };
 
 // Levels
+// In production (Docker), VITE_NJS_URL is unset → empty string → same origin
+// nginx proxies /api/levels, /api/rooms, /api/agora, /socket.io/ → NJS :3001
 export const njsApi = axios.create({
-  baseURL: import.meta.env.VITE_NJS_URL || 'http://localhost:3001',
+  baseURL: import.meta.env.VITE_NJS_URL || '',
   headers: { 'Content-Type': 'application/json' },
 });
 

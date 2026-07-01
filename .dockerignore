@@ -1,0 +1,32 @@
+# ── Repo root ─────────────────────────────────
+.git
+.gitignore
+*.md
+design_patterns_report.md
+SPEC.md
+
+# ── Frontend ──────────────────────────────────
+packages/frontend/node_modules
+packages/frontend/dist
+packages/frontend/.vite
+packages/frontend/.env
+packages/frontend/.env.local
+
+# ── NJS Service ───────────────────────────────
+packages/njs-service/node_modules
+packages/njs-service/dist
+packages/njs-service/data
+packages/njs-service/uploads
+packages/njs-service/.env
+
+# ── .NET Service ──────────────────────────────
+packages/net-service/bin
+packages/net-service/obj
+
+# ── IDE / OS ──────────────────────────────────
+.vscode
+.idea
+*.suo
+*.user
+Thumbs.db
+.DS_Store

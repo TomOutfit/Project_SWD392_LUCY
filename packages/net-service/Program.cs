@@ -105,9 +105,12 @@ app.UseAuthorization();
 app.MapControllers();
 
 Console.WriteLine("\n🔐 LUCY .NET Identity & Payment Service");
-Console.WriteLine("📄 Swagger UI: http://localhost:5001/swagger\n");
 
-app.Run("http://localhost:5001");
+// Respect ASPNETCORE_URLS env var (set by supervisord / Railway / Render).
+// Falls back to localhost:5001 for local development.
+var listenUrl = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5001";
+Console.WriteLine($"📄 Swagger UI: {listenUrl}/swagger\n");
+app.Run(listenUrl);
 
 public class SampleAccountConfig
 {
