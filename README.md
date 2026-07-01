@@ -1,4 +1,6 @@
 # LUCY — Language Unity & Collaborative Youth
+https://project-swd392-lucy.onrender.com/
+https://lucygroup.vercel.app/
 
 Real-time social audio platform for Gen Z language learners (English, Chinese, Japanese), built with a microservices architecture following the École 42 / RBL methodology.
 
