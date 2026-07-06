@@ -56,9 +56,24 @@ builder.Services.AddCors(opt =>
             .SetIsOriginAllowed(_ => true)   // Echo any Origin back (needed for credentials)
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .AllowCredentials()));
+            .AllowCredentials()
+            .WithExposedHeaders("Server-Timing")));
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    context.Response.OnStarting(() =>
+    {
+        stopwatch.Stop();
+        var elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
+        context.Response.Headers["Server-Timing"] = $"app;dur={elapsedMs:F2};desc=\"App Processing\"";
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
 
 using (var scope = app.Services.CreateScope())
 {

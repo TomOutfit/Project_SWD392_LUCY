@@ -41,6 +41,29 @@ export function AgoraRoom() {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
+  // Peer-to-peer pinging state
+  const [pingingUserIds, setPingingUserIds] = useState<Record<number, boolean>>({});
+  const [userLatencies, setUserLatencies] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    const handlePingResult = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setPingingUserIds(prev => ({ ...prev, [detail.fromUserId]: false }));
+      setUserLatencies(prev => ({ ...prev, [detail.fromUserId]: detail.latency }));
+      toast.success(`Latency to ${detail.name}: ${detail.latency}ms`);
+    };
+    window.addEventListener('lucy-user-ping-result', handlePingResult);
+    return () => window.removeEventListener('lucy-user-ping-result', handlePingResult);
+  }, []);
+
+  const handlePingUser = (e: React.MouseEvent, targetUserId: number) => {
+    e.stopPropagation();
+    const { pingUser } = useRoomStore.getState();
+    setPingingUserIds(prev => ({ ...prev, [targetUserId]: true }));
+    pingUser(targetUserId);
+  };
+
+
   useEffect(() => {
     if (!currentRoom?.nextTransitionAt) {
       setTimeLeft(null);
@@ -549,6 +572,15 @@ export function AgoraRoom() {
                     {p.handRaised && <Hand className="w-3 h-3 text-amber" />}
                     {p.oderId === currentRoom.hostId && <Crown className="w-3 h-3 text-amber" />}
                   </div>
+                  {p.oderId !== user.id && (
+                    <button
+                      onClick={(e) => handlePingUser(e, p.oderId)}
+                      className="mt-2 text-[10px] bg-cyan/10 hover:bg-cyan/25 border border-cyan/30 text-cyan rounded-full px-2.5 py-1 font-exo font-bold flex items-center justify-center gap-1 mx-auto transition-all"
+                    >
+                      <Wifi className="w-2.5 h-2.5" />
+                      {pingingUserIds[p.oderId] ? 'Pinging...' : userLatencies[p.oderId] !== undefined ? `${userLatencies[p.oderId]}ms` : 'Ping'}
+                    </button>
+                  )}
                 </motion.div>
               ))}
             </div>

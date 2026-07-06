@@ -31,14 +31,52 @@ const io = new Server(httpServer, {
 
 setIO(io);
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: true, credentials: true, exposedHeaders: ['Server-Timing'] }));
 app.use(express.json());
+
+// Server-Timing Middleware
+app.use((req, res, next) => {
+  const start = process.hrtime();
+  const originalWriteHead = res.writeHead;
+  res.writeHead = function (this: any, statusCode: any, ...args: any[]) {
+    if (!res.headersSent) {
+      const diff = process.hrtime(start);
+      const timeMs = (diff[0] * 1e3 + diff[1] * 1e-6);
+      res.setHeader('Server-Timing', `app;dur=${timeMs.toFixed(2)};desc="Node Processing"`);
+    }
+    return originalWriteHead.apply(this, [statusCode, ...args] as any);
+  } as any;
+  next();
+});
 
 // Serve uploads directory
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', service: 'LUCY Node.js Service', timestamp: new Date().toISOString() }));
+
+// Telemetry/Latency logging endpoint
+app.post('/api/latency/log', (req, res) => {
+  try {
+    const { url, method, totalMs, serverMs, networkMs } = req.body;
+    const logsDir = path.join(process.cwd(), 'logs');
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    const logFilePath = path.join(logsDir, 'network_latency.log');
+    const clientIp = req.ip || req.socket.remoteAddress || 'Unknown';
+    const timestamp = new Date().toISOString();
+    
+    const logLine = `[${timestamp}] [${clientIp}] ${String(method).toUpperCase()} ${url} - RTT: ${Number(totalMs).toFixed(2)}ms, Server: ${Number(serverMs).toFixed(2)}ms, Network: ${Number(networkMs).toFixed(2)}ms\n`;
+    
+    fs.appendFileSync(logFilePath, logLine);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Telemetry] Error logging HTTP latency:', err);
+    res.status(500).json({ error: 'Failed to write log' });
+  }
+});
+
 
 // Level routes
 app.get('/api/levels', getAllLevels);

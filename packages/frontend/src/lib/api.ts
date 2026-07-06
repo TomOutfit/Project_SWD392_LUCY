@@ -8,6 +8,65 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+function attachLatencyTracker(axiosInstance: any, telemetryEndpoint: string) {
+  axiosInstance.interceptors.request.use((config: any) => {
+    if (!config.url?.includes('/telemetry/') && !config.url?.includes('/latency/')) {
+      config.metadata = { startTime: Date.now() };
+    }
+    return config;
+  });
+
+  axiosInstance.interceptors.response.use(
+    (response: any) => {
+      const startTime = response.config?.metadata?.startTime;
+      if (startTime) {
+        const totalMs = Date.now() - startTime;
+        const serverTiming = response.headers['server-timing'];
+        let serverMs = 0;
+        if (serverTiming) {
+          const match = /dur=([\d.]+)/.exec(serverTiming);
+          if (match) serverMs = parseFloat(match[1]);
+        }
+        const networkMs = Math.max(0, totalMs - serverMs);
+        
+        fetch(telemetryEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: response.config.url || '',
+            method: response.config.method || 'GET',
+            totalMs,
+            serverMs,
+            networkMs,
+          }),
+        }).catch(() => {});
+      }
+      return response;
+    },
+    (error: any) => {
+      const startTime = error.config?.metadata?.startTime;
+      if (startTime) {
+        const totalMs = Date.now() - startTime;
+        fetch(telemetryEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: error.config.url || '',
+            method: error.config.method || 'GET',
+            totalMs,
+            serverMs: 0,
+            networkMs: totalMs,
+          }),
+        }).catch(() => {});
+      }
+      return Promise.reject(error);
+    }
+  );
+}
+
+attachLatencyTracker(api, `${API_BASE}/telemetry/log-latency`);
+
+
 // Attach JWT to every request
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('lucy_token');
@@ -66,6 +125,9 @@ export const njsApi = axios.create({
   baseURL: import.meta.env.VITE_NJS_URL || '',
   headers: { 'Content-Type': 'application/json' },
 });
+
+attachLatencyTracker(njsApi, `${import.meta.env.VITE_NJS_URL || ''}/api/latency/log`);
+
 
 export const levelsApi = {
   all: () => njsApi.get('/api/levels'),

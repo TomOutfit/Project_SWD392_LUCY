@@ -118,6 +118,7 @@ interface RoomActions {
   toggleSelfMonitoring: () => void;
   getLocalVolumeLevel: () => number;
   measureLatency: () => void;
+  pingUser: (targetUserId: number) => void;
 }
 
 type RoomStore = RoomState & RoomActions;
@@ -201,6 +202,39 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     on('disconnect', () => {
       set({ isConnected: false });
+    });
+
+    on('ping-from-user', (data: { fromUserId: number; timestamp: number }) => {
+      const s = get().socket;
+      if (s) {
+        s.emit('pong-user', { targetUserId: data.fromUserId, timestamp: data.timestamp });
+      }
+    });
+
+    on('pong-from-user', (data: { fromUserId: number; timestamp: number }) => {
+      const latency = Date.now() - data.timestamp;
+      const participant = get().participants.find(p => p.oderId === data.fromUserId);
+      const name = participant ? participant.oderName : `User ${data.fromUserId}`;
+      
+      console.log(`[Telemetry] Latency to ${name}: ${latency}ms`);
+      
+      // Log peer-to-peer latency in njs-service log
+      const njsUrl = (import.meta.env.VITE_NJS_URL as string | undefined) || '';
+      fetch(`${njsUrl}/api/latency/log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: `WS:ping-user:${data.fromUserId}`,
+          method: 'WS_PING',
+          totalMs: latency,
+          serverMs: 0,
+          networkMs: latency
+        })
+      }).catch(() => {});
+      
+      window.dispatchEvent(new CustomEvent('lucy-user-ping-result', {
+        detail: { fromUserId: data.fromUserId, name, latency }
+      }));
     });
 
     on('room-joined', (data: { room: Room }) => {
@@ -856,11 +890,19 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (socket as any).emit('ping', (res: { ok: boolean; t: number }) => {
         if (res?.ok) {
-          set({ latencyMs: Date.now() - sentAt });
+          const latency = Date.now() - sentAt;
+          set({ latencyMs: latency });
+          (socket as any).emit('log-websocket-latency', { latencyMs: latency });
         }
       });
     }, 5000);
 
     set({ pingInterval: interval });
+  },
+
+  pingUser(targetUserId) {
+    const { socket } = get();
+    if (!socket) return;
+    socket.emit('ping-user', { targetUserId, timestamp: Date.now() });
   },
 }));

@@ -1,11 +1,14 @@
 // src/services/roomService.ts
 import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
 import { Language, RoomState, Participant, ContentPin, Room } from '../types/index.js';
 import { RoomStageSubject, SocketNotifierObserver, DbPersistenceObserver, MaterialRecommenderObserver } from './observer.js';
 import db from '../db/index.js';
 import { levels, rooms as roomsTable, podcasts } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
+
 import { generateRecommendationsFromPin } from './aiService.js';
 
 // In-memory room state (production: use Redis)
@@ -15,6 +18,7 @@ const activeRooms = new Map<string, {
   subject?: RoomStageSubject;
   recording?: { id: string; startedAt: Date; creatorId: number };
   handQueue: Participant[];
+  userSockets: Map<number, Set<string>>;
 }>();
 
 export function registerSocketHandlers(io: Server, socket: Socket) {
@@ -26,6 +30,19 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
   socket.on('join-room', ({ roomId, user }) => {
     const roomData = activeRooms.get(roomId);
     if (!roomData) return socket.emit('error', { message: 'Room not found' });
+
+    if (!roomData.userSockets) {
+      roomData.userSockets = new Map<number, Set<string>>();
+    }
+
+    let socketsSet = roomData.userSockets.get(user.id);
+    if (!socketsSet) {
+      socketsSet = new Set<string>();
+      roomData.userSockets.set(user.id, socketsSet);
+    }
+
+    const isNewUserConnection = socketsSet.size === 0;
+    socketsSet.add(socket.id);
 
     const existing = roomData.room.participants.find(p => p.oderId === user.id);
 
@@ -53,6 +70,10 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       socket.join(roomId);
       socket.data.currentRoom = roomId;
       socket.emit('room-joined', { room: roomData.room, userId: user.id });
+      
+      if (isNewUserConnection) {
+        io.to(roomId).emit('room-updated', { room: roomData.room });
+      }
     }
   });
 
@@ -250,6 +271,52 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
   socket.on('ping', (cb) => {
     try { cb({ ok: true, t: Date.now() }); } catch { /* noop */ }
   });
+
+  socket.on('log-websocket-latency', ({ latencyMs }) => {
+    try {
+      const logsDir = path.join(process.cwd(), 'logs');
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+      const logFilePath = path.join(logsDir, 'websocket_latency.log');
+      const clientIp = socket.handshake.address || 'Unknown';
+      const timestamp = new Date().toISOString();
+      
+      const logLine = `[${timestamp}] [${clientIp}] User: ${userId} (${userRole}) - Socket.io Ping RTT: ${latencyMs}ms\n`;
+      
+      fs.appendFileSync(logFilePath, logLine);
+    } catch (err) {
+      console.error('[Telemetry] Error logging WebSocket latency:', err);
+    }
+  });
+
+  socket.on('ping-user', ({ targetUserId, timestamp }) => {
+    const currentRoomId = socket.data.currentRoom;
+    if (!currentRoomId) return;
+    const roomData = activeRooms.get(currentRoomId);
+    if (!roomData) return;
+    
+    const targetSockets = roomData.userSockets?.get(targetUserId);
+    if (targetSockets) {
+      for (const socketId of targetSockets) {
+        io.to(socketId).emit('ping-from-user', { fromUserId: userId, timestamp });
+      }
+    }
+  });
+
+  socket.on('pong-user', ({ targetUserId, timestamp }) => {
+    const currentRoomId = socket.data.currentRoom;
+    if (!currentRoomId) return;
+    const roomData = activeRooms.get(currentRoomId);
+    if (!roomData) return;
+    
+    const targetSockets = roomData.userSockets?.get(targetUserId);
+    if (targetSockets) {
+      for (const socketId of targetSockets) {
+        io.to(socketId).emit('pong-from-user', { fromUserId: userId, timestamp });
+      }
+    }
+  });
 }
 
 function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
@@ -257,6 +324,20 @@ function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
   if (!roomData) return;
 
   const oderId = socket.data.userId;
+
+  if (roomData.userSockets) {
+    const socketsSet = roomData.userSockets.get(oderId);
+    if (socketsSet) {
+      socketsSet.delete(socket.id);
+      if (socketsSet.size > 0) {
+        // Still has other active connections, just leave socket room but do not clean up participant
+        socket.leave(roomId);
+        socket.data.currentRoom = undefined;
+        return;
+      }
+    }
+  }
+
   roomData.room.participants = roomData.room.participants.filter(p => p.oderId !== oderId);
   roomData.room.participantCount = roomData.room.participants.length;
   roomData.handQueue = roomData.handQueue.filter(q => q.oderId !== oderId);
@@ -296,7 +377,7 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
     await rd.subject?.transitionToNextSubLevel(rd.room);
   }, 10 * 60 * 1000); // 10 minutes per sub-level
 
-  activeRooms.set(id, { room: fullRoom, stageTimer, subject, handQueue: [] });
+  activeRooms.set(id, { room: fullRoom, stageTimer, subject, handQueue: [], userSockets: new Map<number, Set<string>>() });
   return id;
 }
 
