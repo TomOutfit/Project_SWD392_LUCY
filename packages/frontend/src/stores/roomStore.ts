@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import AgoraRTC, { IAgoraRTCClient, ILocalAudioTrack } from 'agora-rtc-sdk-ng';
 import { api, roomsApi } from '@/lib/api';
 import { Room, Participant, ContentPin, LevelContent } from '@/types/index';
+import { useAuthStore } from '@/stores/authStore';
 
 // ─── Socket Server Events ─────────────────────────────────────────────────────
 interface ServerEvents {
@@ -23,6 +24,7 @@ interface ServerEvents {
     giftType: string;
     amount: number;
     recipientName: string;
+    recipientId: number;
     id: string;
   };
   'room-closed': { roomId: string };
@@ -33,6 +35,7 @@ interface ServerEvents {
     roomId: string;
     recommendation: LevelContent & { levelName: string; levelId: number };
   };
+  'kicked-from-room': { roomId: string };
   'error': { message: string };
 }
 
@@ -43,6 +46,7 @@ export interface GiftEvent {
   giftType: string;
   amount: number;
   recipientName: string;
+  recipientId: number;
 }
 
 // ─── State Shape ──────────────────────────────────────────────────────────────
@@ -119,6 +123,8 @@ interface RoomActions {
   getLocalVolumeLevel: () => number;
   measureLatency: () => void;
   pingUser: (targetUserId: number) => void;
+  kickUser: (participantId: number) => void;
+  toggleAutoTransition: (autoTransition: boolean) => void;
 }
 
 type RoomStore = RoomState & RoomActions;
@@ -333,12 +339,30 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     on('gift-received', (evt: ServerEvents['gift-received']) => {
       set((s) => ({ giftEvents: [...s.giftEvents, evt] }));
+      
+      // Update balance in authStore if the recipient is the logged-in user
+      const { user, updateBalance } = useAuthStore.getState();
+      if (user && user.id === evt.recipientId) {
+        updateBalance(user.walletBalance + evt.amount);
+        // Also update totalGiftsReceived
+        useAuthStore.getState().updateUser({
+          totalGiftsReceived: (user.totalGiftsReceived || 0) + evt.amount
+        });
+      }
+
       setTimeout(() => {
         set((s) => ({ giftEvents: s.giftEvents.filter((e) => e.id !== evt.id) }));
       }, 5000);
     });
 
     on('room-closed', () => {
+      get().leaveRoom();
+    });
+
+    on('kicked-from-room', () => {
+      import('react-hot-toast').then(({ toast }) => {
+        toast.error('You have been kicked from the room by the host.');
+      });
       get().leaveRoom();
     });
 
@@ -408,7 +432,8 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     set({ joiningRoomId: roomId });
 
-    const user = JSON.parse(localStorage.getItem('lucy_user') || '{}');
+    const user = useAuthStore.getState().user;
+    if (!user) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('join-room', {
       roomId,
@@ -517,11 +542,25 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     (socket as any).emit('revoke-speak', { roomId: currentRoom.id, participantId });
   },
 
+  kickUser(participantId) {
+    const { socket, currentRoom } = get();
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('kick-user', { roomId: currentRoom.id, userIdToKick: participantId });
+  },
+
   forceStageTransition() {
     const { socket, currentRoom } = get();
     if (!socket || !currentRoom) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('force-stage-transition', { roomId: currentRoom.id });
+  },
+
+  toggleAutoTransition(autoTransition) {
+    const { socket, currentRoom } = get();
+    if (!socket || !currentRoom) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('toggle-auto-transition', { roomId: currentRoom.id, autoTransition });
   },
 
   // ── Content ──────────────────────────────────────────────────────────────────

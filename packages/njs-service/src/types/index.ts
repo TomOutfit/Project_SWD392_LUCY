@@ -37,6 +37,7 @@ export interface Room {
   createdAt?: string;
   nextTransitionAt?: string;
   participantCount: number;
+  autoTransition?: boolean;
 }
 
 export interface Participant {
@@ -113,7 +114,7 @@ export interface ServerEvents {
   'speak-granted': { roomId: string; oderId: number };
   'speak-revoked': { roomId: string; oderId: number };
   'stage-changed': { roomId: string; newSubLevel: number; levelName: string };
-  'gift-received': { senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string };
+  'gift-received': { senderName: string; senderPersonaId: number; giftType: string; amount: number; recipientName: string; recipientId: number };
   'room-closed': { roomId: string };
   'pinned-content-updated': { roomId: string; pin: ContentPin | null };
   'recording-started': { roomId: string; recordingId: string };

@@ -1,5 +1,6 @@
 // src/pages/PodcastsPage.tsx
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mic2, Play, Clock, Sparkles } from 'lucide-react';
 import { podcastsApi } from '@/lib/api';
@@ -12,6 +13,14 @@ export default function PodcastsPage() {
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [loading, setLoading] = useState(true);
   const { user } = useAuthStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && user.role === 'LUCY') {
+      navigate('/');
+      return;
+    }
+  }, [user, navigate]);
 
   useEffect(() => {
     podcastsApi.all()

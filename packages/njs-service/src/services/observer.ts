@@ -48,7 +48,11 @@ export class RoomStageSubject implements Subject {
     if (room.currentSubLevel < 12) {
       room.currentSubLevel++;
       room.state = 'Transition' as any; // Temporary transition state
-      room.nextTransitionAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      if (room.participantCount > 1) {
+        room.nextTransitionAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      } else {
+        room.nextTransitionAt = undefined;
+      }
 
       // Notify observers that transition has started
       this.notify('stage-changed', { roomId: this.roomId, room });

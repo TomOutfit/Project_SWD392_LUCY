@@ -57,6 +57,9 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       };
       roomData.room.participants.push(participant);
       roomData.room.participantCount = roomData.room.participants.length;
+      if (roomData.room.participantCount > 1 && !roomData.room.nextTransitionAt) {
+        roomData.room.nextTransitionAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      }
       socket.join(roomId);
       socket.data.currentRoom = roomId;
 
@@ -239,6 +242,13 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     await roomData.subject?.transitionToNextSubLevel(roomData.room);
   });
 
+  socket.on('toggle-auto-transition', ({ roomId, autoTransition }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData || roomData.room.hostId !== socket.data.userId) return;
+    roomData.room.autoTransition = autoTransition;
+    io.to(roomId).emit('room-updated', { room: roomData.room });
+  });
+
   socket.on('get-recommendations', async ({ roomId }) => {
     const roomData = activeRooms.get(roomId);
     if (!roomData) return;
@@ -259,7 +269,33 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       giftType,
       amount,
       recipientName,
+      recipientId,
     });
+  });
+
+  socket.on('kick-user', ({ roomId, userIdToKick }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData || roomData.room.hostId !== socket.data.userId) return;
+
+    const targetSockets = roomData.userSockets?.get(userIdToKick);
+    if (targetSockets) {
+      for (const socketId of targetSockets) {
+        const targetSocket = io.sockets.sockets.get(socketId);
+        if (targetSocket) {
+          targetSocket.emit('kicked-from-room', { roomId });
+          targetSocket.leave(roomId);
+          targetSocket.data.currentRoom = undefined;
+        }
+      }
+    }
+
+    roomData.room.participants = roomData.room.participants.filter(p => p.oderId !== userIdToKick);
+    roomData.room.participantCount = roomData.room.participants.length;
+    roomData.handQueue = roomData.handQueue.filter(q => q.oderId !== userIdToKick);
+
+    io.to(roomId).emit('room-left', { roomId, oderId: userIdToKick, kicked: true });
+    io.to(roomId).emit('room-updated', { room: roomData.room });
+    io.to(roomId).emit('hand-queue-updated', { roomId, queue: roomData.handQueue });
   });
 
   socket.on('disconnect', () => {
@@ -280,8 +316,25 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       }
       const logFilePath = path.join(logsDir, 'websocket_latency.log');
       const clientIp = socket.handshake.address || 'Unknown';
-      const timestamp = new Date().toISOString();
       
+      // Format for markdown file
+      const now = new Date();
+      const timestampMD = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const endpointStr = `\`WebSocket Ping (User: ${userId})\``;
+      const networkLatencyStr = `~${Number(latencyMs).toFixed(2)} ms`;
+      const serviceLatencyStr = `~0.00 ms (Socket)`;
+      const totalLatencyStr = `~${Number(latencyMs).toFixed(2)} ms`;
+      const noteStr = `Client IP: ${clientIp}`;
+      
+      const mdRow = `| ${timestampMD} | ${endpointStr} | ${networkLatencyStr} | ${serviceLatencyStr} | ${totalLatencyStr} | ${noteStr} |\n`;
+      
+      // Write to document/latency_metrics.md
+      const mdFilePath = path.join(process.cwd(), '..', '..', 'document', 'latency_metrics.md');
+      if (fs.existsSync(mdFilePath)) {
+        fs.appendFileSync(mdFilePath, mdRow);
+      }
+
+      const timestamp = now.toISOString();
       const logLine = `[${timestamp}] [${clientIp}] User: ${userId} (${userRole}) - Socket.io Ping RTT: ${latencyMs}ms\n`;
       
       fs.appendFileSync(logFilePath, logLine);
@@ -340,6 +393,9 @@ function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
 
   roomData.room.participants = roomData.room.participants.filter(p => p.oderId !== oderId);
   roomData.room.participantCount = roomData.room.participants.length;
+  if (roomData.room.participantCount <= 1) {
+    roomData.room.nextTransitionAt = undefined;
+  }
   roomData.handQueue = roomData.handQueue.filter(q => q.oderId !== oderId);
 
   socket.leave(roomId);
@@ -359,7 +415,7 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
     pinnedContent: null,
     participantCount: 0,
     createdAt: new Date().toISOString(),
-    nextTransitionAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    nextTransitionAt: undefined,
   };
 
   const subject = new RoomStageSubject(id);
@@ -367,15 +423,21 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
   subject.attach(new DbPersistenceObserver());
   subject.attach(new MaterialRecommenderObserver(ioInstance));
 
-  // Set up auto stage progression (every 10 minutes)
+  // Set up auto stage progression (polls every second)
   const stageTimer = setInterval(async () => {
     const rd = activeRooms.get(id);
     if (!rd || rd.room.state === RoomState.CLOSED) {
       clearInterval(stageTimer);
       return;
     }
-    await rd.subject?.transitionToNextSubLevel(rd.room);
-  }, 10 * 60 * 1000); // 10 minutes per sub-level
+    // Only transition if timer is active and elapsed
+    if (rd.room.participantCount > 1 && rd.room.nextTransitionAt) {
+      const diffMs = new Date(rd.room.nextTransitionAt).getTime() - Date.now();
+      if (diffMs <= 0) {
+        await rd.subject?.transitionToNextSubLevel(rd.room);
+      }
+    }
+  }, 1000);
 
   activeRooms.set(id, { room: fullRoom, stageTimer, subject, handQueue: [], userSockets: new Map<number, Set<string>>() });
   return id;

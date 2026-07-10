@@ -65,8 +65,25 @@ app.post('/api/latency/log', (req, res) => {
     }
     const logFilePath = path.join(logsDir, 'network_latency.log');
     const clientIp = req.ip || req.socket.remoteAddress || 'Unknown';
-    const timestamp = new Date().toISOString();
     
+    // Format for markdown file
+    const now = new Date();
+    const timestampMD = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    const endpointStr = `\`${String(method).toUpperCase()} ${url}\``;
+    const networkLatencyStr = `~${Number(networkMs).toFixed(2)} ms`;
+    const serviceLatencyStr = `~${Number(serverMs).toFixed(2)} ms`;
+    const totalLatencyStr = `~${Number(totalMs).toFixed(2)} ms`;
+    const noteStr = `Client IP: ${clientIp}`;
+    
+    const mdRow = `| ${timestampMD} | ${endpointStr} | ${networkLatencyStr} | ${serviceLatencyStr} | ${totalLatencyStr} | ${noteStr} |\n`;
+    
+    // Write to document/latency_metrics.md
+    const mdFilePath = path.join(process.cwd(), '..', '..', 'document', 'latency_metrics.md');
+    if (fs.existsSync(mdFilePath)) {
+      fs.appendFileSync(mdFilePath, mdRow);
+    }
+
+    const timestamp = now.toISOString();
     const logLine = `[${timestamp}] [${clientIp}] ${String(method).toUpperCase()} ${url} - RTT: ${Number(totalMs).toFixed(2)}ms, Server: ${Number(serverMs).toFixed(2)}ms, Network: ${Number(networkMs).toFixed(2)}ms\n`;
     
     fs.appendFileSync(logFilePath, logLine);

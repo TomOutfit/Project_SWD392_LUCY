@@ -9,6 +9,7 @@ export interface User {
   personaId: number;
   role: UserRole;
   walletBalance: number;
+  totalGiftsReceived?: number;
 }
 
 export interface Level {
@@ -45,6 +46,7 @@ export interface Room {
   pinnedContent?: ContentPin | null;
   createdAt: string;
   nextTransitionAt?: string;
+  autoTransition?: boolean;
 }
 
 export interface Participant {
@@ -116,12 +118,18 @@ export const PERSONA_GRADIENTS: Record<number, string> = {
 };
 
 export const GIFT_TYPES = [
+  { id: 'like', name: 'Like', emoji: '👍', price: 1 },
+  { id: 'rose', name: 'Rose', emoji: '🌹', price: 2 },
   { id: 'heart', name: 'Heart', emoji: '❤️', price: 5 },
   { id: 'star', name: 'Star', emoji: '⭐', price: 10 },
-  { id: 'rocket', name: 'Rocket', emoji: '🚀', price: 25 },
-  { id: 'diamond', name: 'Diamond', emoji: '💎', price: 50 },
-  { id: 'crown', name: 'Crown', emoji: '👑', price: 100 },
-  { id: 'trophy', name: 'Trophy', emoji: '🏆', price: 500 },
+  { id: 'coffee', name: 'Coffee', emoji: '☕', price: 15 },
+  { id: 'pizza', name: 'Pizza', emoji: '🍕', price: 30 },
+  { id: 'rocket', name: 'Rocket', emoji: '🚀', price: 50 },
+  { id: 'diamond', name: 'Diamond', emoji: '💎', price: 100 },
+  { id: 'crown', name: 'Crown', emoji: '👑', price: 200 },
+  { id: 'unicorn', name: 'Unicorn', emoji: '🦄', price: 500 },
+  { id: 'castle', name: 'Castle', emoji: '🏰', price: 1000 },
+  { id: 'supercar', name: 'Supercar', emoji: '🏎️', price: 2000 },
 ];
 
 export const LANG_FLAGS: Record<Language, string> = {

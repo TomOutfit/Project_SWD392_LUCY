@@ -6,6 +6,8 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { roomsApi } from '@/lib/api';
 import { Room } from '@/types/index';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '@/stores/authStore';
 
 const giftStats = [
   { type: 'Crown 👑', count: 4, value: 400, color: 'text-amber' },
@@ -20,6 +22,14 @@ export default function DashboardPage() {
   const [activeRooms, setActiveRooms] = useState<Room[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const { user } = useAuthStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && user.role === 'LUCY') {
+      navigate('/');
+    }
+  }, [user, navigate]);
 
   useEffect(() => {
     let active = true;
@@ -43,10 +53,14 @@ export default function DashboardPage() {
     };
   }, []);
 
+  const filteredActiveRooms = user?.role === 'SUPER'
+    ? activeRooms
+    : activeRooms.filter(r => r.hostId === user?.id);
+
   // Filter based on selected room
   const selectedRooms = selectedRoomId === 'all'
-    ? activeRooms
-    : activeRooms.filter(r => r.id === selectedRoomId);
+    ? filteredActiveRooms
+    : filteredActiveRooms.filter(r => r.id === selectedRoomId);
 
   const activeStudents = selectedRooms.flatMap(room =>
     (room.participants || []).map(p => ({
@@ -64,12 +78,12 @@ export default function DashboardPage() {
   );
 
   const totalSpeakingTime = activeStudents.reduce((acc, curr) => acc + curr.speakingTimeSec, 0);
-  const totalGifts = activeRooms.reduce((acc, r) => acc + ((r.participants || []).length > 0 ? 5 : 0), 0);
+  const totalGifts = filteredActiveRooms.reduce((acc, r) => acc + ((r.participants || []).length > 0 ? 5 : 0), 0);
   const averageEngagement = activeStudents.length > 0
     ? Math.round(activeStudents.reduce((acc, curr) => acc + curr.joinedDurationMin, 0) / activeStudents.length)
     : 0;
 
-  const pinnedMaterials = activeRooms
+  const pinnedMaterials = filteredActiveRooms
     .filter(r => r.pinnedContent !== null)
     .map(r => ({
       roomName: r.name,
@@ -85,11 +99,18 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8 pb-6 border-b border-ghost/40">
         <div>
-          <h1 className="font-orbitron font-black text-3xl tracking-wider bg-gradient-to-r from-cyan to-violet bg-clip-text text-transparent">
-            Lobby Operations Center
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="font-orbitron font-black text-3xl tracking-wider bg-gradient-to-r from-cyan to-violet bg-clip-text text-transparent">
+              Lobby Operations Center
+            </h1>
+            {user && (
+              <Badge variant={user.role === 'SUPER' ? 'magenta' : 'violet'} className="text-[10px] font-bold tracking-wider uppercase animate-pulse">
+                {user.role === 'SUPER' ? 'Creator - Global View' : 'Pro - Host View'}
+              </Badge>
+            )}
+          </div>
           <p className="text-xs text-mist font-exo mt-1 uppercase tracking-widest font-semibold text-cyan">
-            Real-time analytics, speaker meters, and level engagement trackers
+            {user?.role === 'SUPER' ? 'Real-time global analytics for all classrooms' : 'Real-time analytics for your hosted classrooms'}
           </p>
         </div>
         <div className="flex items-center gap-1.5 bg-navy p-1 rounded-xl border border-ghost">
@@ -110,7 +131,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Room Selector */}
-      {activeRooms.length > 0 && (
+      {filteredActiveRooms.length > 0 && (
         <div className="mb-6 flex flex-wrap items-center gap-3 bg-navy/40 p-4 rounded-2xl border border-ghost">
           <span className="text-xs font-exo font-bold text-mist uppercase tracking-widest flex items-center gap-1.5">
             <Eye className="w-4 h-4 text-cyan" /> Classroom Filter:
@@ -120,8 +141,8 @@ export default function DashboardPage() {
             onChange={(e) => setSelectedRoomId(e.target.value)}
             className="bg-[#0c0c1e] border border-ghost text-xs text-[#F0F4FF] rounded-lg px-4 py-2 focus:border-cyan outline-none transition-all cursor-pointer font-exo font-semibold"
           >
-            <option value="all">All Active Rooms ({activeRooms.length})</option>
-            {activeRooms.map((room) => (
+            <option value="all">All Active Rooms ({filteredActiveRooms.length})</option>
+            {filteredActiveRooms.map((room) => (
               <option key={room.id} value={room.id}>
                 {room.name} ({room.levelName})
               </option>
@@ -131,7 +152,7 @@ export default function DashboardPage() {
       )}
 
       {/* Empty State */}
-      {activeRooms.length === 0 && !loading && (
+      {filteredActiveRooms.length === 0 && !loading && (
         <div className="flex flex-col items-center justify-center p-16 text-center glass border border-ghost rounded-3xl relative overflow-hidden mt-6 max-w-xl mx-auto">
           <span className="text-6xl mb-4">🎙️</span>
           <h2 className="font-orbitron font-extrabold text-xl text-[#F0F4FF] mb-2 uppercase tracking-wide">No active rooms found</h2>
@@ -155,7 +176,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!loading && activeRooms.length > 0 && (
+      {!loading && filteredActiveRooms.length > 0 && (
         <>
           {/* Overview Tab */}
           {activeTab === 'overview' && (

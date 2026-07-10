@@ -48,7 +48,7 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
         });
         await db.SaveChangesAsync();
 
-        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = MapUser(user) });
+        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = await MapUserWithGiftsAsync(user) });
     }
 
     [HttpPost("login")]
@@ -60,7 +60,7 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
         if (user == null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             return Unauthorized(new { error = "Invalid email or password" });
 
-        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = MapUser(user) });
+        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = await MapUserWithGiftsAsync(user) });
     }
 
     private string GenerateJwt(User user)
@@ -109,13 +109,25 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
         db.Users.Add(user);
         await db.SaveChangesAsync();
 
-        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = MapUser(user) });
+        return Ok(new { token = GenerateJwt(user), refreshToken = Guid.NewGuid(), user = await MapUserWithGiftsAsync(user) });
     }
 
-    private static object MapUser(User u) => new
+    private async Task<object> MapUserWithGiftsAsync(User u)
     {
-        u.Id, u.Email, u.DisplayName, u.PersonaId, u.Role, u.WalletBalance
-    };
+        var totalGiftsReceived = await db.GiftTransactions
+            .Where(g => g.RecipientId == u.Id)
+            .SumAsync(g => g.Amount);
+        return new
+        {
+            u.Id,
+            u.Email,
+            u.DisplayName,
+            u.PersonaId,
+            u.Role,
+            u.WalletBalance,
+            TotalGiftsReceived = totalGiftsReceived
+        };
+    }
 }
 
 public record RegisterRequest(string Email, string Password, string DisplayName, int PersonaId);

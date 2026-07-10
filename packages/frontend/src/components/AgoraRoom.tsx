@@ -1,10 +1,11 @@
 // src/components/AgoraRoom.tsx
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX } from 'lucide-react';
+import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX, UserMinus } from 'lucide-react';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Avatar } from '@/components/ui/Avatar';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { GIFT_TYPES } from '@/types/index';
@@ -15,7 +16,7 @@ export function AgoraRoom() {
   const {
     currentRoom, participants, handQueue, isMuted, isSpeaking,
     pinnedContent, isRecording, recordingTime, isUploading, giftEvents, leaveRoom,
-    toggleHand, toggleMute, grantSpeak, revokeSpeak,
+    toggleHand, toggleMute, grantSpeak, revokeSpeak, kickUser,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
     latencyMs, selectedMicrophoneId, switchMicrophone,
     isSelfMonitoring, toggleSelfMonitoring
@@ -44,6 +45,79 @@ export function AgoraRoom() {
   // Peer-to-peer pinging state
   const [pingingUserIds, setPingingUserIds] = useState<Record<number, boolean>>({});
   const [userLatencies, setUserLatencies] = useState<Record<number, number>>({});
+
+  // Gift particles state for animation
+  interface GiftParticle {
+    id: number;
+    emoji: string;
+    x: number;
+    size: number;
+    delay: number;
+    duration: number;
+  }
+  const [particles, setParticles] = useState<GiftParticle[]>([]);
+  const prevGiftEventsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    giftEvents.forEach(evt => {
+      if (!prevGiftEventsRef.current.includes(evt.id)) {
+        prevGiftEventsRef.current.push(evt.id);
+        const gift = GIFT_TYPES.find(g => g.id === evt.giftType);
+        const emoji = gift?.emoji || '🎁';
+        const particleCount = evt.amount >= 500 ? 45 : evt.amount >= 100 ? 30 : evt.amount >= 15 ? 15 : 8;
+        const newParticles: GiftParticle[] = [];
+        for (let i = 0; i < particleCount; i++) {
+          newParticles.push({
+            id: Math.random() + i,
+            emoji,
+            x: 10 + Math.random() * 80,
+            size: 20 + Math.random() * (evt.amount >= 100 ? 30 : 15),
+            delay: Math.random() * 1000,
+            duration: 2 + Math.random() * 2.5,
+          });
+        }
+        setParticles(prev => [...prev, ...newParticles]);
+        setTimeout(() => {
+          setParticles(prev => prev.filter(p => !newParticles.includes(p)));
+        }, 5000);
+      }
+    });
+  }, [giftEvents]);
+
+  const getGiftTierStyles = (amount: number) => {
+    if (amount >= 500) {
+      return {
+        border: 'border border-amber-400 bg-gradient-to-b from-[#2E2512]/90 to-[#120E05]/95 shadow-[0_0_40px_rgba(251,191,36,0.6)] backdrop-blur-md',
+        badge: 'bg-gradient-to-r from-amber-400 to-orange-500 text-void font-extrabold uppercase animate-pulse',
+        text: 'text-amber-400 font-bold',
+      };
+    } else if (amount >= 100) {
+      return {
+        border: 'border border-pink-500 bg-gradient-to-b from-[#2B1220]/90 to-[#12050E]/95 shadow-[0_0_30px_rgba(236,72,153,0.5)] backdrop-blur-md',
+        badge: 'bg-gradient-to-r from-pink-500 to-magenta text-white font-bold',
+        text: 'text-pink-400 font-bold',
+      };
+    } else if (amount >= 15) {
+      return {
+        border: 'border border-violet-500/80 bg-[#140F26]/90 shadow-[0_0_20px_rgba(139,92,246,0.4)] backdrop-blur-md',
+        badge: 'bg-[#8B5CF6] text-white',
+        text: 'text-violet-300',
+      };
+    } else {
+      return {
+        border: 'border border-cyan-500/60 bg-[#0E1724]/90 shadow-[0_0_15px_rgba(6,182,212,0.3)] backdrop-blur-md',
+        badge: 'bg-cyan-500 text-void',
+        text: 'text-cyan-300',
+      };
+    }
+  };
+
+  const isGiftAllowed = (price: number) => {
+    if (!user) return false;
+    if (user.role === 'SUPER') return true;
+    if (user.role === 'PRO') return price < 500;
+    return price < 50; // 'LUCY'
+  };
 
   useEffect(() => {
     const handlePingResult = (e: Event) => {
@@ -218,7 +292,7 @@ export function AgoraRoom() {
         )}
 
         {/* AI Recommended LMS Content */}
-        {recommendation && (
+        {recommendation && user.role !== 'LUCY' && (
           <div className="p-4 border-b border-ghost flex-1 overflow-y-auto space-y-4">
             <h3 className="text-xs font-exo font-semibold text-cyan uppercase tracking-wider flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5" /> AI Recommendations
@@ -231,7 +305,7 @@ export function AgoraRoom() {
                 {recommendation.vocabulary.map((vocab) => (
                   <div key={vocab} className="group relative flex items-center gap-1 px-2 py-1 rounded bg-[#1A1A35] border border-ghost text-xs text-[#F0F4FF]">
                     <span>{vocab}</span>
-                    {isHost && (
+                    {isSuper && (
                       <button
                         onClick={() => pinContent(`Vocabulary: ${vocab}`, vocab, 'vocabulary')}
                         className="opacity-0 group-hover:opacity-100 ml-1 text-cyan hover:text-pulse transition-all"
@@ -252,7 +326,7 @@ export function AgoraRoom() {
                 {recommendation.grammarTips.map((tip, idx) => (
                   <li key={idx} className="group relative text-xs text-mist leading-relaxed pl-3 before:content-['•'] before:absolute before:left-0 before:text-cyan flex items-start justify-between">
                     <span className="flex-1 text-[11px]">{tip}</span>
-                    {isHost && (
+                    {isSuper && (
                       <button
                         onClick={() => pinContent(`Grammar Tip`, tip, 'grammar')}
                         className="opacity-0 group-hover:opacity-100 ml-1 text-cyan hover:text-pulse transition-all flex-shrink-0"
@@ -273,7 +347,7 @@ export function AgoraRoom() {
                 {recommendation.conversationPrompts.map((prompt, idx) => (
                   <li key={idx} className="group relative p-2 rounded bg-navy/50 border border-ghost/40 text-[11px] text-mist flex items-start justify-between gap-1.5">
                     <span className="flex-1">{prompt}</span>
-                    {isHost && (
+                    {isSuper && (
                       <button
                         onClick={() => pinContent(`Discussion Prompt`, prompt, 'conversation')}
                         className="opacity-0 group-hover:opacity-100 text-cyan hover:text-pulse transition-all flex-shrink-0"
@@ -295,7 +369,7 @@ export function AgoraRoom() {
                   {recommendation.aiSuggestedQuestions.map((question, idx) => (
                     <li key={idx} className="group relative p-2 rounded bg-navy/50 border border-ghost/40 text-[11px] text-mist flex items-start justify-between gap-1.5">
                       <span className="flex-1">{question}</span>
-                      {isHost && (
+                      {isSuper && (
                         <button
                           onClick={() => pinContent(`Suggested Question`, question, 'conversation')}
                           className="opacity-0 group-hover:opacity-100 text-cyan hover:text-pulse transition-all flex-shrink-0"
@@ -415,23 +489,60 @@ export function AgoraRoom() {
   return (
     <div className="min-h-screen bg-void flex flex-col">
       <AnimatePresence>
-        {giftEvents.map((evt) => (
-          <motion.div
-            key={evt.id}
-            initial={{ opacity: 0, y: 60, scale: 0.5 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.5 }}
-            className="fixed top-24 left-1/2 z-50 glass rounded-2xl px-6 py-3 flex items-center gap-3 shadow-card"
-          >
-            <Avatar personaId={evt.senderPersonaId} size="sm" />
-            <div>
-              <p className="text-sm font-exo font-bold text-[#F0F4FF]">{evt.senderName}</p>
-              <p className="text-xs text-mist">sent {evt.giftType} to {evt.recipientName}</p>
-            </div>
-            <span className="text-2xl">{GIFT_TYPES.find(g => g.id === evt.giftType)?.emoji}</span>
-          </motion.div>
-        ))}
+        {giftEvents.map((evt) => {
+          const tier = getGiftTierStyles(evt.amount);
+          return (
+            <motion.div
+              key={evt.id}
+              initial={{ opacity: 0, y: -60, x: '-50%', scale: 0.8 }}
+              animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+              exit={{ opacity: 0, y: -40, x: '-50%', scale: 0.8 }}
+              className={`fixed top-20 left-1/2 z-50 rounded-2xl px-6 py-3 flex items-center gap-4 ${tier.border}`}
+            >
+              <Avatar personaId={evt.senderPersonaId} size="sm" />
+              <div>
+                <p className="text-sm font-exo font-bold text-[#F0F4FF]">
+                  {evt.senderName}
+                </p>
+                <p className="text-xs text-mist flex items-center gap-1.5 mt-0.5">
+                  sent <span className={`px-1.5 py-0.5 rounded text-[10px] ${tier.badge}`}>{evt.giftType.toUpperCase()}</span> to {evt.recipientName}
+                </p>
+              </div>
+              <span className="text-3xl animate-bounce">
+                {GIFT_TYPES.find(g => g.id === evt.giftType)?.emoji}
+              </span>
+            </motion.div>
+          );
+        })}
       </AnimatePresence>
+
+      {/* Floating Gift Particles Overlay */}
+      <div className="fixed inset-0 pointer-events-none z-40 overflow-hidden">
+        <AnimatePresence>
+          {particles.map((p) => (
+            <motion.div
+              key={p.id}
+              initial={{ y: '105vh', x: `${p.x}vw`, rotate: 0, opacity: 0 }}
+              animate={{
+                y: '-10vh',
+                x: `${p.x + (Math.random() * 16 - 8)}vw`,
+                rotate: Math.random() * 360 - 180,
+                opacity: [0, 1, 1, 0]
+              }}
+              exit={{ opacity: 0 }}
+              transition={{
+                delay: p.delay / 1000,
+                duration: p.duration,
+                ease: 'easeOut'
+              }}
+              className="absolute select-none pointer-events-none"
+              style={{ fontSize: `${p.size}px` }}
+            >
+              {p.emoji}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       {/* Header */}
       <div className="glass border-b border-ghost px-4 py-3 flex items-center justify-between">
@@ -441,9 +552,19 @@ export function AgoraRoom() {
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-xs text-mist">
                 {currentRoom.levelName} · Sub-level {currentRoom.currentSubLevel}/12
-                {timeLeft !== null && (
-                  <span className="text-cyan font-mono ml-2 font-semibold">
-                    (Next: {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')})
+                {timeLeft !== null ? (
+                  timeLeft > 0 ? (
+                    <span className="text-cyan font-mono ml-2 font-semibold">
+                      (Next: {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')})
+                    </span>
+                  ) : (
+                    <span className="text-rose-400 font-mono ml-2 font-semibold animate-pulse">
+                      {isHost ? "(Time's Up! Please advance)" : "(Waiting for host to advance...)"}
+                    </span>
+                  )
+                ) : (
+                  <span className="text-amber font-mono ml-2 text-[10px] font-bold uppercase tracking-wider">
+                    (Paused - Waiting for students)
                   </span>
                 )}
               </p>
@@ -458,6 +579,25 @@ export function AgoraRoom() {
                 >
                   Force Next Sub-Level
                 </button>
+              )}
+              {isHost && (
+                <label className="flex items-center gap-1.5 cursor-pointer ml-3 select-none">
+                  <input
+                    type="checkbox"
+                    checked={currentRoom.autoTransition ?? false}
+                    onChange={(e) => {
+                      const { toggleAutoTransition } = useRoomStore.getState();
+                      toggleAutoTransition(e.target.checked);
+                      toast.success(
+                        e.target.checked
+                          ? 'Auto stage transition enabled.'
+                          : 'Auto stage transition disabled.'
+                      );
+                    }}
+                    className="w-3.5 h-3.5 rounded border-ghost bg-void text-cyan focus:ring-0 focus:ring-offset-0"
+                  />
+                  <span className="text-[10px] text-mist font-exo font-semibold uppercase">Auto-Advance</span>
+                </label>
               )}
             </div>
           </div>
@@ -556,23 +696,46 @@ export function AgoraRoom() {
                   key={`${p.oderId}-${idx}`}
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className={`p-3 rounded-xl border text-center transition-all ${p.isSpeaking && !p.isMuted
-                      ? 'border-cyan bg-cyan/10 shadow-cyan'
-                      : 'border-ghost bg-midnight'
-                    }`}
-                  onClick={() => isHost && p.oderId !== user.id && (p.isSpeaking ? revokeSpeak(p.oderId) : grantSpeak(p.oderId))}
-                  title={isHost ? 'Click to grant/revoke speak' : undefined}
+                  className={`p-3 rounded-xl border text-center transition-all relative group overflow-hidden ${
+                    p.isSpeaking && !p.isMuted
+                      ? 'border-cyan bg-cyan/10 shadow-[0_0_15px_rgba(0,245,255,0.25)]'
+                      : 'border-ghost bg-[#0f0f23]'
+                  }`}
                 >
-                  <div className="flex justify-center mb-2">
+                  <div className="relative flex justify-center mb-2">
+                    {p.isSpeaking && !p.isMuted && (
+                      <span className="absolute inset-0 rounded-full border border-cyan/40 animate-ping opacity-75 max-w-[48px] mx-auto" />
+                    )}
                     <Avatar personaId={p.oderPersonaId} name={p.oderName} size="lg" showBadge role={p.oderRole} />
+                    
+                    <span className={`absolute bottom-0 right-[calc(50%-24px)] flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-bold border ${
+                      p.isSpeaking && !p.isMuted
+                        ? 'bg-cyan text-void border-cyan shadow-sm animate-pulse'
+                        : 'bg-void text-mist border-ghost'
+                    }`}>
+                      {p.isSpeaking && !p.isMuted ? '🎙️' : '🔇'}
+                    </span>
                   </div>
-                  <p className="text-xs font-exo font-semibold text-[#F0F4FF] truncate">{p.oderName}</p>
-                  <div className="flex items-center justify-center gap-1 mt-1">
-                    {p.isSpeaking && !p.isMuted && <span className="w-1.5 h-1.5 rounded-full bg-cyan animate-glow-dot" />}
-                    {p.handRaised && <Hand className="w-3 h-3 text-amber" />}
-                    {p.oderId === currentRoom.hostId && <Crown className="w-3 h-3 text-amber" />}
+
+                  <p className="text-xs font-exo font-bold text-[#F0F4FF] truncate">{p.oderName}</p>
+                  
+                  <div className="flex items-center justify-center gap-1.5 mt-1 text-[10px] text-mist font-semibold">
+                    <Badge variant={p.oderRole === 'SUPER' ? 'magenta' : p.oderRole === 'PRO' ? 'violet' : 'cyan'} className="px-1 py-0 text-[8px] font-bold">
+                      {p.oderRole}
+                    </Badge>
+                    {p.handRaised && (
+                      <span className="text-[10px] animate-bounce" title="Hand Raised">
+                        ✋
+                      </span>
+                    )}
+                    {p.oderId === currentRoom.hostId && (
+                      <span title="Room Host">
+                        <Crown className="w-3 h-3 text-amber" />
+                      </span>
+                    )}
                   </div>
-                  {p.oderId !== user.id && (
+
+                  {p.oderId !== user?.id && (
                     <button
                       onClick={(e) => handlePingUser(e, p.oderId)}
                       className="mt-2 text-[10px] bg-cyan/10 hover:bg-cyan/25 border border-cyan/30 text-cyan rounded-full px-2.5 py-1 font-exo font-bold flex items-center justify-center gap-1 mx-auto transition-all"
@@ -580,6 +743,38 @@ export function AgoraRoom() {
                       <Wifi className="w-2.5 h-2.5" />
                       {pingingUserIds[p.oderId] ? 'Pinging...' : userLatencies[p.oderId] !== undefined ? `${userLatencies[p.oderId]}ms` : 'Ping'}
                     </button>
+                  )}
+
+                  {/* Host Action Overlay */}
+                  {isHost && p.oderId !== user?.id && (
+                    <div className="opacity-0 group-hover:opacity-100 transition-all duration-200 absolute inset-0 bg-[#0c0c1edf]/95 flex flex-col justify-center items-center gap-2 p-3 rounded-xl border border-cyan/40 z-10 backdrop-blur-sm">
+                      <p className="text-[10px] font-orbitron font-black text-cyan truncate max-w-full tracking-wider">
+                        {p.oderName}
+                      </p>
+                      
+                      {p.isSpeaking ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); revokeSpeak(p.oderId); }}
+                          className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500 hover:text-[#0c0c1e] text-[9px] font-exo font-black transition-all uppercase tracking-wider"
+                        >
+                          <MicOff className="w-3.5 h-3.5" /> Mute User
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); grantSpeak(p.oderId); }}
+                          className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500 hover:text-[#0c0c1e] text-[9px] font-exo font-black transition-all uppercase tracking-wider"
+                        >
+                          <Mic className="w-3.5 h-3.5" /> Grant Speak
+                        </button>
+                      )}
+
+                      <button
+                        onClick={(e) => { e.stopPropagation(); kickUser(p.oderId); }}
+                        className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500 hover:text-white text-[9px] font-exo font-black transition-all uppercase tracking-wider"
+                      >
+                        <UserMinus className="w-3.5 h-3.5" /> Kick User
+                      </button>
+                    </div>
                   )}
                 </motion.div>
               ))}
@@ -669,23 +864,37 @@ export function AgoraRoom() {
 
       {/* Gift Modal */}
       <Modal isOpen={showGiftModal} onClose={() => { setShowGiftModal(false); setSelectedGift(null); }} title="Send a Gift" size="md">
-        <div className="grid grid-cols-3 gap-3">
-          {GIFT_TYPES.map((gift) => (
-            <button
-              key={gift.id}
-              onClick={() => setSelectedGift(gift)}
-              className={`p-4 rounded-xl border text-center transition-all ${selectedGift?.id === gift.id ? 'border-cyan bg-cyan/10' : 'border-ghost hover:border-violet/50'
+        <div className="grid grid-cols-4 gap-3">
+          {GIFT_TYPES.map((gift) => {
+            const allowed = isGiftAllowed(gift.price);
+            return (
+              <button
+                key={gift.id}
+                disabled={!allowed}
+                onClick={() => allowed && setSelectedGift(gift)}
+                className={`p-3 rounded-xl border text-center transition-all relative overflow-hidden ${
+                  selectedGift?.id === gift.id
+                    ? 'border-cyan bg-cyan/10'
+                    : !allowed
+                      ? 'border-ghost/30 opacity-40 cursor-not-allowed bg-navy/10'
+                      : 'border-ghost hover:border-violet/50'
                 }`}
-            >
-              <span className="text-3xl block mb-2">{gift.emoji}</span>
-              <p className="text-xs font-exo font-semibold text-[#F0F4FF]">{gift.name}</p>
-              <p className="text-xs text-mist">${gift.price}</p>
-            </button>
-          ))}
+              >
+                {!allowed && (
+                  <span className="absolute top-0.5 right-0.5 text-[6px] font-exo font-black px-1 py-0.5 rounded bg-violet/20 border border-violet/40 text-violet">
+                    {gift.price >= 500 ? 'CREATOR' : 'PRO'}
+                  </span>
+                )}
+                <span className="text-2xl block mb-1">{gift.emoji}</span>
+                <p className="text-[11px] font-exo font-semibold text-[#F0F4FF] truncate">{gift.name}</p>
+                <p className="text-[10px] text-mist">${gift.price}</p>
+              </button>
+            );
+          })}
         </div>
         {selectedGift && (
           <div className="mt-4 flex gap-2 flex-wrap">
-            {participants.filter(p => p.oderId !== user.id).map((p, idx) => (
+            {participants.filter(p => p.oderId !== user?.id).map((p, idx) => (
               <button key={`${p.oderId}-${idx}`}
                 onClick={() => handleSendGift(p.oderId, p.oderName)}
                 className="flex-1 p-2 rounded-lg bg-navy border border-ghost hover:border-cyan transition-all text-center min-w-[80px]">

@@ -37,9 +37,9 @@ export function Navbar() {
             <>
               <NavLink to="/create-room" icon={<Mic2 className="w-4 h-4" />} label="Create" />
               <NavLink to="/dashboard" icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" />
+              <NavLink to="/podcasts" icon={<Mic2 className="w-4 h-4" />} label="Podcasts" />
             </>
           )}
-          <NavLink to="/podcasts" icon={<Mic2 className="w-4 h-4" />} label="Podcasts" />
           <NavLink to="/leaderboard" icon={<Trophy className="w-4 h-4" />} label="Ranks" />
         </div>
 

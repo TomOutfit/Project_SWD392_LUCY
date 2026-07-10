@@ -43,9 +43,12 @@ export default function ProfilePage() {
     setDepositing(true);
     try {
       const res = await walletApi.deposit(amount);
-      setWallet(res.data);
+      setWallet(prev => prev ? { ...prev, balance: res.data.balance } : null);
       updateBalance(res.data.balance);
       setDepositAmount('');
+      // Reload history to show deposit
+      const histRes = await walletApi.get();
+      setWallet(histRes.data);
     } catch {
       alert('Deposit failed');
     }
@@ -190,7 +193,7 @@ export default function ProfilePage() {
                   <p className="text-xs text-mist mt-1">Balance</p>
                 </div>
                 <div className="text-center">
-                  <p className="font-orbitron font-bold text-2xl text-violet">$0</p>
+                  <p className="font-orbitron font-bold text-2xl text-violet">${(user.totalGiftsReceived ?? 0).toFixed(0)}</p>
                   <p className="text-xs text-mist mt-1">Earned</p>
                 </div>
                 <div className="text-center">
@@ -213,7 +216,7 @@ export default function ProfilePage() {
             <div className="flex-1 p-4 rounded-xl bg-navy border border-ghost text-center">
               <p className="text-xs text-mist mb-1">Available Balance</p>
               <p className="font-orbitron font-black text-3xl text-amber">
-                ${wallet?.balance.toFixed(2) ?? user.walletBalance.toFixed(2)}
+                ${(wallet?.balance ?? user.walletBalance).toFixed(2)}
               </p>
             </div>
           </div>
@@ -277,11 +280,11 @@ export default function ProfilePage() {
             <div className="space-y-2">
               {[1, 2, 3].map(i => <div key={i} className="h-12 skeleton rounded-lg" />)}
             </div>
-          ) : wallet?.history.length === 0 ? (
+          ) : !wallet || !wallet.history || wallet.history.length === 0 ? (
             <p className="text-mist text-sm text-center py-8 italic">No transactions yet</p>
           ) : (
             <div className="space-y-2">
-              {wallet?.history.map(h => (
+              {wallet.history.map(h => (
                 <div key={h.id} className="flex items-center justify-between p-3 rounded-lg bg-navy border border-ghost">
                   <div>
                     <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{h.description}</p>

@@ -22,7 +22,10 @@ public class UsersController(AppDbContext db) : ControllerBase
         var userId = GetUserId();
         var user = await db.Users.FindAsync(userId);
         if (user == null) return NotFound();
-        return Ok(new { user.Id, user.Email, user.DisplayName, user.PersonaId, user.Role, user.WalletBalance });
+        var totalGiftsReceived = await db.GiftTransactions
+            .Where(g => g.RecipientId == userId)
+            .SumAsync(g => g.Amount);
+        return Ok(new { user.Id, user.Email, user.DisplayName, user.PersonaId, user.Role, user.WalletBalance, TotalGiftsReceived = totalGiftsReceived });
     }
 
     [HttpGet("leaderboard")]
@@ -97,7 +100,11 @@ public class UsersController(AppDbContext db) : ControllerBase
         }
         await db.SaveChangesAsync();
 
-        return Ok(new { user.Id, user.Email, user.DisplayName, user.PersonaId, user.Role, user.WalletBalance });
+        var totalGiftsReceived = await db.GiftTransactions
+            .Where(g => g.RecipientId == userId)
+            .SumAsync(g => g.Amount);
+
+        return Ok(new { user.Id, user.Email, user.DisplayName, user.PersonaId, user.Role, user.WalletBalance, TotalGiftsReceived = totalGiftsReceived });
     }
 
     [HttpDelete("me")]
