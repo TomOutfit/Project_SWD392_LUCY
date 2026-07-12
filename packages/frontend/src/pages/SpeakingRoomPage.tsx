@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mic2, Volume2, VolumeX, Loader2, Info, ArrowRight } from 'lucide-react';
 import { AgoraRoom } from '@/components/AgoraRoom';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 
 export default function SpeakingRoomPage() {
   const { roomId } = useParams();
+  const navigate = useNavigate();
   const { currentRoom, isConnected, joiningRoomId, joinRoom, connectSocket, joinAgoraChannel, agoraJoined, agoraJoining, agoraFailed } = useRoomStore();
   const { user, loginAsGuest } = useAuthStore();
 
@@ -110,6 +111,19 @@ export default function SpeakingRoomPage() {
       useRoomStore.getState().leaveRoom();
     };
   }, []);
+
+  // Redirect to homepage if kicked by host or room closed
+  useEffect(() => {
+    const handleRedirect = () => {
+      navigate('/');
+    };
+    window.addEventListener('lucy-kicked-from-room', handleRedirect);
+    window.addEventListener('lucy-room-closed', handleRedirect);
+    return () => {
+      window.removeEventListener('lucy-kicked-from-room', handleRedirect);
+      window.removeEventListener('lucy-room-closed', handleRedirect);
+    };
+  }, [navigate]);
 
   // ── Loading / connecting state ──────────────────────────────────────────────
   if (!user) {

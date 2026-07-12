@@ -57,6 +57,10 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       };
       roomData.room.participants.push(participant);
       roomData.room.participantCount = roomData.room.participants.length;
+      db.update(roomsTable)
+        .set({ participantCount: roomData.room.participantCount })
+        .where(eq(roomsTable.id, roomId))
+        .catch(err => console.error('[roomService] Failed to update participantCount in DB:', err));
       if (roomData.room.participantCount > 1 && !roomData.room.nextTransitionAt) {
         roomData.room.nextTransitionAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
       }
@@ -291,6 +295,10 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
 
     roomData.room.participants = roomData.room.participants.filter(p => p.oderId !== userIdToKick);
     roomData.room.participantCount = roomData.room.participants.length;
+    db.update(roomsTable)
+      .set({ participantCount: roomData.room.participantCount })
+      .where(eq(roomsTable.id, roomId))
+      .catch(err => console.error('[roomService] Failed to update participantCount in DB:', err));
     roomData.handQueue = roomData.handQueue.filter(q => q.oderId !== userIdToKick);
 
     io.to(roomId).emit('room-left', { roomId, oderId: userIdToKick, kicked: true });
@@ -393,6 +401,10 @@ function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
 
   roomData.room.participants = roomData.room.participants.filter(p => p.oderId !== oderId);
   roomData.room.participantCount = roomData.room.participants.length;
+  db.update(roomsTable)
+    .set({ participantCount: roomData.room.participantCount })
+    .where(eq(roomsTable.id, roomId))
+    .catch(err => console.error('[roomService] Failed to update participantCount in DB:', err));
   if (roomData.room.participantCount <= 1) {
     roomData.room.nextTransitionAt = undefined;
   }

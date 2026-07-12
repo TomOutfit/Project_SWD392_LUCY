@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { LogOut, Wallet, Trophy, BookOpen, Mic2, LayoutDashboard } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useRoomStore } from '@/stores/roomStore';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -59,7 +60,11 @@ export function Navbar() {
             </div>
           </Link>
 
-          <Button variant="ghost" size="sm" onClick={() => { logout(); navigate('/login'); }}>
+          <Button variant="ghost" size="sm" onClick={() => {
+            useRoomStore.getState().disconnectSocket();
+            logout();
+            navigate('/login');
+          }}>
             <LogOut className="w-3.5 h-3.5" />
           </Button>
         </div>

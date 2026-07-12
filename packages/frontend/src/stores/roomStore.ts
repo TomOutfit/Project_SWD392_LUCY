@@ -175,7 +175,7 @@ const initialState: RoomState = {
 export const useRoomStore = create<RoomStore>((set, get) => ({
   ...initialState,
 
-  connectSocket(userId, userName, userPersonaId, userRole, roomId?) {
+  connectSocket(userId, userName, userPersonaId, userRole, _roomId?) {
     const existing = get().socket;
     if (existing?.connected) return;
 
@@ -195,9 +195,6 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       auth: { userId, userName, userPersonaId, userRole },
     } as any);
 
-    // Use a typed emit wrapper to satisfy socket.io-client's strict generics
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const emit = <Ev extends string>(ev: Ev, ...args: any[]) => socket.emit(ev, ...args);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const on = (ev: string, handler: (...args: any[]) => void) =>
       socket.on(ev, handler);
@@ -356,7 +353,11 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
 
     on('room-closed', () => {
+      import('react-hot-toast').then(({ toast }) => {
+        toast.error('The speaking room has been closed by the host.');
+      });
       get().leaveRoom();
+      window.dispatchEvent(new CustomEvent('lucy-room-closed'));
     });
 
     on('kicked-from-room', () => {
@@ -364,6 +365,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         toast.error('You have been kicked from the room by the host.');
       });
       get().leaveRoom();
+      window.dispatchEvent(new CustomEvent('lucy-kicked-from-room'));
     });
 
     on('pinned-content-updated', (data: { pin: ContentPin | null }) => {
@@ -403,17 +405,17 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     on('error', (data: { message: string }) => {
       console.error('[roomStore] Socket error:', data.message);
+      if (data.message === 'Room not found') {
+        import('react-hot-toast').then(({ toast }) => {
+          toast.error('The speaking room was not found or has been closed.');
+        });
+        get().leaveRoom();
+        window.dispatchEvent(new CustomEvent('lucy-room-closed'));
+      }
     });
 
-    set({ socket, isConnected: true });
+    set({ socket });
     get().measureLatency();
-
-    if (roomId) {
-      emit('join-room', {
-        roomId,
-        user: { id: userId, name: userName, personaId: userPersonaId, role: userRole },
-      });
-    }
   },
 
   disconnectSocket() {
@@ -447,7 +449,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   },
 
   leaveRoom() {
-    const { socket, currentRoom, agoraJoined, recordingInterval } = get();
+    const { socket, isConnected, pingInterval, selectedMicrophoneId, currentRoom, agoraJoined, recordingInterval } = get();
 
     if (recordingInterval) clearInterval(recordingInterval);
 
@@ -462,6 +464,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     set({
       ...initialState,
+      socket,
+      isConnected,
+      pingInterval,
+      selectedMicrophoneId,
       reconnectAttempts: 0,
     });
   },
@@ -472,6 +478,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('close-room', { roomId: currentRoom.id });
     get().leaveRoom();
+    window.dispatchEvent(new CustomEvent('lucy-room-closed'));
   },
 
   // ── Speaking ─────────────────────────────────────────────────────────────────
@@ -545,6 +552,13 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   kickUser(participantId) {
     const { socket, currentRoom } = get();
     if (!socket || !currentRoom) return;
+
+    // Optimistically update local participant cards for instant UI feedback
+    set((s) => ({
+      participants: s.participants.filter((p) => p.oderId !== participantId),
+      handQueue: s.handQueue.filter((p) => p.oderId !== participantId),
+    }));
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('kick-user', { roomId: currentRoom.id, userIdToKick: participantId });
   },
