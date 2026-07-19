@@ -55,43 +55,116 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', service: 'LUCY Node.js Service', timestamp: new Date().toISOString() }));
 
-// Telemetry/Latency logging endpoint
+// ── Latency helpers ──────────────────────────────────────────────────────────
+
+/** In-memory ring-buffer (max 500 rows) shared between HTTP + WS logging */
+const latencyBuffer: Array<{
+  timestamp: string; endpoint: string;
+  networkMs: number; serverMs: number; totalMs: number; clientIp: string;
+}> = [];
+const LATENCY_BUFFER_MAX = 500;
+
+/**
+ * Resolve the absolute path to `document/latency_metrics.md`.
+ *
+ * Resolution order:
+ *   1. LATENCY_MD_PATH  — explicit override (useful in Docker / CI)
+ *   2. Walk up from process.cwd() looking for "document/latency_metrics.md"
+ *      (works whether the process is started from packages/njs-service or the
+ *       project root).
+ */
+function resolveLatencyMdPath(): string | null {
+  // 1. Env override
+  if (process.env.LATENCY_MD_PATH) return process.env.LATENCY_MD_PATH;
+
+  // 2. Walk up at most 4 levels from cwd
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const candidate = path.join(dir, 'document', 'latency_metrics.md');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return null;
+}
+
+function appendToLatencyMd(mdRow: string): void {
+  const mdFilePath = resolveLatencyMdPath();
+  if (mdFilePath) {
+    try {
+      fs.appendFileSync(mdFilePath, mdRow);
+    } catch (e) {
+      console.warn('[Telemetry] Could not write to latency_metrics.md:', e);
+    }
+  }
+}
+
+function formatMdRow(
+  now: Date,
+  endpointStr: string,
+  networkMs: number,
+  serverMs: number,
+  totalMs: number,
+  clientIp: string,
+): string {
+  const timestampMD = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  return `| ${timestampMD} | ${endpointStr} | ~${networkMs.toFixed(2)} ms | ~${serverMs.toFixed(2)} ms | ~${totalMs.toFixed(2)} ms | Client IP: ${clientIp} |\n`;
+}
+
+function logLatencyEntry(
+  now: Date,
+  endpointStr: string,
+  networkMs: number,
+  serverMs: number,
+  totalMs: number,
+  clientIp: string,
+  logFileName: string,
+): void {
+  const logsDir = path.join(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+
+  // Raw .log file (always written)
+  const logLine = `[${now.toISOString()}] [${clientIp}] ${endpointStr} - RTT: ${totalMs.toFixed(2)}ms, Server: ${serverMs.toFixed(2)}ms, Network: ${networkMs.toFixed(2)}ms\n`;
+  try { fs.appendFileSync(path.join(logsDir, logFileName), logLine); } catch { /* non-fatal */ }
+
+  // In-memory buffer
+  latencyBuffer.push({
+    timestamp: now.toISOString(),
+    endpoint: endpointStr,
+    networkMs, serverMs, totalMs, clientIp,
+  });
+  if (latencyBuffer.length > LATENCY_BUFFER_MAX) latencyBuffer.shift();
+
+  // Markdown file (written wherever the file is found — local dev only in most cases)
+  appendToLatencyMd(formatMdRow(now, endpointStr, networkMs, serverMs, totalMs, clientIp));
+}
+
+// ── Telemetry / Latency endpoints ─────────────────────────────────────────────
+
+// POST /api/latency/log — called by the frontend Axios interceptor after each HTTP request
 app.post('/api/latency/log', (req, res) => {
   try {
     const { url, method, totalMs, serverMs, networkMs } = req.body;
-    const logsDir = path.join(process.cwd(), 'logs');
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
-    }
-    const logFilePath = path.join(logsDir, 'network_latency.log');
     const clientIp = req.ip || req.socket.remoteAddress || 'Unknown';
-    
-    // Format for markdown file
     const now = new Date();
-    const timestampMD = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     const endpointStr = `\`${String(method).toUpperCase()} ${url}\``;
-    const networkLatencyStr = `~${Number(networkMs).toFixed(2)} ms`;
-    const serviceLatencyStr = `~${Number(serverMs).toFixed(2)} ms`;
-    const totalLatencyStr = `~${Number(totalMs).toFixed(2)} ms`;
-    const noteStr = `Client IP: ${clientIp}`;
-    
-    const mdRow = `| ${timestampMD} | ${endpointStr} | ${networkLatencyStr} | ${serviceLatencyStr} | ${totalLatencyStr} | ${noteStr} |\n`;
-    
-    // Write to document/latency_metrics.md
-    const mdFilePath = path.join(process.cwd(), '..', '..', 'document', 'latency_metrics.md');
-    if (fs.existsSync(mdFilePath)) {
-      fs.appendFileSync(mdFilePath, mdRow);
-    }
 
-    const timestamp = now.toISOString();
-    const logLine = `[${timestamp}] [${clientIp}] ${String(method).toUpperCase()} ${url} - RTT: ${Number(totalMs).toFixed(2)}ms, Server: ${Number(serverMs).toFixed(2)}ms, Network: ${Number(networkMs).toFixed(2)}ms\n`;
-    
-    fs.appendFileSync(logFilePath, logLine);
+    logLatencyEntry(now, endpointStr, Number(networkMs), Number(serverMs), Number(totalMs), clientIp, 'network_latency.log');
     res.json({ success: true });
   } catch (err) {
     console.error('[Telemetry] Error logging HTTP latency:', err);
     res.status(500).json({ error: 'Failed to write log' });
   }
+});
+
+// GET /api/latency/metrics — export in-memory buffer as JSON (useful when deployed)
+app.get('/api/latency/metrics', (_req, res) => {
+  res.json({
+    count: latencyBuffer.length,
+    mdPath: resolveLatencyMdPath() ?? '(not found — deployed environment)',
+    entries: latencyBuffer,
+  });
 });
 
 

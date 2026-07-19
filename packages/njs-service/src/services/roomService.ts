@@ -11,6 +11,49 @@ import { and, eq } from 'drizzle-orm';
 
 import { generateRecommendationsFromPin } from './aiService.js';
 
+// ── Latency helpers (shared with index.ts via module-level helpers) ───────────
+
+/** Walk up from cwd to find document/latency_metrics.md, or use LATENCY_MD_PATH env. */
+function resolveLatencyMdPathRS(): string | null {
+  if (process.env.LATENCY_MD_PATH) return process.env.LATENCY_MD_PATH;
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const candidate = path.join(dir, 'document', 'latency_metrics.md');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function appendWsLatency(
+  now: Date,
+  userId: number | string,
+  userRole: string,
+  latencyMs: number,
+  clientIp: string,
+): void {
+  const logsDir = path.join(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+
+  // Raw .log file (always written)
+  const logLine = `[${now.toISOString()}] [${clientIp}] User: ${userId} (${userRole}) - Socket.io Ping RTT: ${latencyMs}ms\n`;
+  try { fs.appendFileSync(path.join(logsDir, 'websocket_latency.log'), logLine); } catch { /* non-fatal */ }
+
+  // Markdown file
+  const mdFilePath = resolveLatencyMdPathRS();
+  if (mdFilePath) {
+    const dd = now.getDate().toString().padStart(2, '0');
+    const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+    const hh = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const timestampMD = `${dd}/${mm}/${now.getFullYear()} ${hh}:${min}`;
+    const mdRow = `| ${timestampMD} | \`WebSocket Ping (User: ${userId})\` | ~${Number(latencyMs).toFixed(2)} ms | ~0.00 ms (Socket) | ~${Number(latencyMs).toFixed(2)} ms | Client IP: ${clientIp} |\n`;
+    try { fs.appendFileSync(mdFilePath, mdRow); } catch { /* non-fatal */ }
+  }
+}
+
 // In-memory room state (production: use Redis)
 const activeRooms = new Map<string, {
   room: Room;
@@ -318,34 +361,8 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
 
   socket.on('log-websocket-latency', ({ latencyMs }) => {
     try {
-      const logsDir = path.join(process.cwd(), 'logs');
-      if (!fs.existsSync(logsDir)) {
-        fs.mkdirSync(logsDir, { recursive: true });
-      }
-      const logFilePath = path.join(logsDir, 'websocket_latency.log');
       const clientIp = socket.handshake.address || 'Unknown';
-      
-      // Format for markdown file
-      const now = new Date();
-      const timestampMD = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      const endpointStr = `\`WebSocket Ping (User: ${userId})\``;
-      const networkLatencyStr = `~${Number(latencyMs).toFixed(2)} ms`;
-      const serviceLatencyStr = `~0.00 ms (Socket)`;
-      const totalLatencyStr = `~${Number(latencyMs).toFixed(2)} ms`;
-      const noteStr = `Client IP: ${clientIp}`;
-      
-      const mdRow = `| ${timestampMD} | ${endpointStr} | ${networkLatencyStr} | ${serviceLatencyStr} | ${totalLatencyStr} | ${noteStr} |\n`;
-      
-      // Write to document/latency_metrics.md
-      const mdFilePath = path.join(process.cwd(), '..', '..', 'document', 'latency_metrics.md');
-      if (fs.existsSync(mdFilePath)) {
-        fs.appendFileSync(mdFilePath, mdRow);
-      }
-
-      const timestamp = now.toISOString();
-      const logLine = `[${timestamp}] [${clientIp}] User: ${userId} (${userRole}) - Socket.io Ping RTT: ${latencyMs}ms\n`;
-      
-      fs.appendFileSync(logFilePath, logLine);
+      appendWsLatency(new Date(), userId, userRole, Number(latencyMs), clientIp);
     } catch (err) {
       console.error('[Telemetry] Error logging WebSocket latency:', err);
     }
