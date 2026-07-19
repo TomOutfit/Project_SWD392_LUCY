@@ -64,6 +64,9 @@ COPY --from=njs-builder /build/njs/dist ./dist
 COPY --from=njs-builder /build/njs/node_modules ./node_modules
 COPY --from=njs-builder /build/njs/package.json ./package.json
 
+# Copy document directory to allow latency logs to be recorded on deploy
+COPY document/ /app/document/
+
 # Persistent directories for SQLite DB + uploaded audio files
 RUN mkdir -p /app/njs/data /app/njs/uploads
 
