@@ -2,6 +2,7 @@
 .git
 .gitignore
 *.md
+!document/latency_metrics.md
 design_patterns_report.md
 SPEC.md
 
