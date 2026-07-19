@@ -77,38 +77,14 @@ function resolveLatencyMdPath(): string | null {
   // 1. Env override
   if (process.env.LATENCY_MD_PATH) return process.env.LATENCY_MD_PATH;
 
-  const isDeployed = process.env.NODE_ENV === 'production' || fs.existsSync('/.dockerenv') || process.cwd().startsWith('/app');
-
-  if (isDeployed) {
-    // Look in persistent data directory first
-    const persistentPath = path.join(process.cwd(), 'data', 'latency_metrics.md');
-    if (fs.existsSync(persistentPath)) return persistentPath;
-
-    // If not found in data but a template exists at /app/document/latency_metrics.md, copy it to data/
-    const templatePath = '/app/document/latency_metrics.md';
-    if (fs.existsSync(templatePath)) {
-      try {
-        const dataDir = path.dirname(persistentPath);
-        if (!fs.existsSync(dataDir)) {
-          fs.mkdirSync(dataDir, { recursive: true });
-        }
-        fs.copyFileSync(templatePath, persistentPath);
-        console.log(`[Telemetry] Initialized persistent latency_metrics.md from template at ${persistentPath}`);
-        return persistentPath;
-      } catch (e) {
-        console.warn(`[Telemetry] Failed to copy latency template to persistent path:`, e);
-      }
-    }
-  } else {
-    // 2. Walk up at most 4 levels from cwd (Local development)
-    let dir = process.cwd();
-    for (let i = 0; i < 5; i++) {
-      const candidate = path.join(dir, 'document', 'latency_metrics.md');
-      if (fs.existsSync(candidate)) return candidate;
-      const parent = path.dirname(dir);
-      if (parent === dir) break; // reached filesystem root
-      dir = parent;
-    }
+  // 2. Walk up at most 4 levels from cwd
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const candidate = path.join(dir, 'document', 'latency_metrics.md');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
   }
 
   return null;

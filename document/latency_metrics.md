@@ -49,10 +49,8 @@ Frontend định kỳ emit sự kiện `ping` và đo thời gian nhận callbac
 Server tự tìm file `latency_metrics.md` theo thứ tự ưu tiên:
 1. Biến môi trường `LATENCY_MD_PATH` (cấu hình tường minh trên Docker/deploy)
 2. Tự động walk-up từ `process.cwd()` lên tối đa 4 cấp (hoạt động cả local dev và monorepo)
-3. Tìm trong thư mục persistent volume: `data/latency_metrics.md`
-4. Nếu chưa tồn tại trong `data/`, tự động copy template từ `/app/document/latency_metrics.md` sang `data/latency_metrics.md`.
 
-> **Trên môi trường deploy (Docker/Render):** Dữ liệu chạy Realtime được hệ thống tự động ghi nhận trực tiếp vào bảng ở **Section 5** của file `data/latency_metrics.md` trong persistent volume.
+> **Trên môi trường deploy (Docker/Render):** Dữ liệu chạy Realtime được hệ thống tự động ghi nhận trực tiếp vào bảng ở **Section 5** của file `/app/document/latency_metrics.md` (được copy vào container tại thời điểm build).
 > Bạn có thể xem hoặc tải trực tiếp file markdown đã cập nhật thời gian thực thông qua các endpoint:
 > - `GET /api/latency/raw`: Xem raw Markdown trực tiếp trên trình duyệt.
 > - `GET /api/latency/download`: Tải file `latency_metrics.md` về máy.
