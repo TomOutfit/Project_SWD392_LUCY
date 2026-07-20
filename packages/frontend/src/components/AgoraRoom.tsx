@@ -1,7 +1,7 @@
 // src/components/AgoraRoom.tsx
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX, UserMinus } from 'lucide-react';
+import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX, UserMinus, Copy } from 'lucide-react';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -19,7 +19,8 @@ export function AgoraRoom() {
     toggleHand, toggleMute, grantSpeak, revokeSpeak, kickUser,
     pinContent, startRecording, stopRecording, closeRoom, recommendation,
     latencyMs, selectedMicrophoneId, switchMicrophone,
-    isSelfMonitoring, toggleSelfMonitoring
+    isSelfMonitoring, toggleSelfMonitoring,
+    knockRequests, approveKnock, denyKnock
   } = useRoomStore();
 
   const user = useAuthStore((s) => s.user);
@@ -544,11 +545,65 @@ export function AgoraRoom() {
         </AnimatePresence>
       </div>
 
+      {/* Knock Requests dialog for the host */}
+      {isHost && knockRequests.length > 0 && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[9999] w-full max-w-sm px-4">
+          <AnimatePresence>
+            {knockRequests.map(req => (
+              <motion.div
+                key={req.socketId}
+                initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="glass border border-cyan/40 bg-navy/95 p-4 rounded-2xl shadow-[0_0_30px_rgba(0,245,255,0.15)] flex flex-col gap-3"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-cyan animate-pulse" />
+                  <p className="text-xs text-mist leading-relaxed font-exo font-bold">
+                    Someone wants to join:
+                  </p>
+                </div>
+                <p className="text-sm font-bold text-[#F0F4FF]">{req.user.name}</p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => approveKnock(currentRoom.id, req.socketId)}
+                    className="flex-1 bg-cyan text-void text-xs font-bold py-1.5"
+                  >
+                    Admit
+                  </Button>
+                  <Button
+                    onClick={() => denyKnock(currentRoom.id, req.socketId)}
+                    className="flex-1 bg-void border border-ghost hover:border-red-500 text-mist hover:text-red-500 text-xs font-bold py-1.5"
+                  >
+                    Deny
+                  </Button>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
       {/* Header */}
       <div className="glass border-b border-ghost px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="font-orbitron font-bold text-sm text-[#F0F4FF]">{currentRoom.name}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-orbitron font-bold text-sm text-[#F0F4FF]">{currentRoom.name}</h2>
+              <span className="text-[11px] font-mono text-cyan bg-cyan/15 border border-cyan/35 px-2 py-0.5 rounded flex items-center gap-1.5 select-all shadow-[0_0_10px_rgba(0,245,255,0.05)]">
+                Code: {currentRoom.id}
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(currentRoom.id);
+                    toast.success('Room code copied to clipboard!');
+                  }}
+                  className="hover:text-cyan-300 active:scale-95 transition-all text-cyan flex items-center justify-center"
+                  title="Copy room code"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+              </span>
+            </div>
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-xs text-mist">
                 {currentRoom.levelName} · Sub-level {currentRoom.currentSubLevel}/12

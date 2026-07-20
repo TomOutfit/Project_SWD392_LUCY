@@ -14,6 +14,14 @@ namespace LucyNetService.Controllers;
 [Produces("application/json")]
 public class GiftsController(AppDbContext db) : ControllerBase
 {
+    /// <summary>
+    /// Sends a virtual gift to another user inside a specific room.
+    /// </summary>
+    /// <param name="req">The gift transaction request containing the 10-character room code (format: abc-defg-hij).</param>
+    /// <response code="200">Gift sent successfully, returns updated wallet balance.</response>
+    /// <response code="400">Invalid parameters, self-gifting, or insufficient balance.</response>
+    /// <response code="401">Unauthorized request.</response>
+    /// <response code="404">Sender or recipient not found.</response>
     [HttpPost("send")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -147,5 +155,12 @@ public class GiftsController(AppDbContext db) : ControllerBase
     private int GetUserId() => int.Parse(User.FindFirstValue("userId")!);
 }
 
+/// <summary>
+/// Payload to send a virtual gift inside a speaking room.
+/// </summary>
+/// <param name="RecipientEmail">The email of the recipient or the anonymous user format: user_{id}@lucy.local.</param>
+/// <param name="RoomId">The 10-character alphanumeric room code (format: abc-defg-hij) identifying the room.</param>
+/// <param name="GiftType">The type of gift being sent (e.g. Crown 👑, Rocket 🚀, Diamond 💎, Star ⭐, Heart ❤️).</param>
+/// <param name="Amount">The monetary or coin value of the gift.</param>
 public record SendGiftRequest(string RecipientEmail, string RoomId, string GiftType, decimal Amount);
 public record UpdateGiftRequest(string? GiftType, decimal? Amount);

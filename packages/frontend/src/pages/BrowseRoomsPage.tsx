@@ -11,6 +11,7 @@ import { RoomCardSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import type { Room, Language } from '@/types/index';
 import { LANG_FLAGS, LANG_NAMES } from '@/types/index';
+import toast from 'react-hot-toast';
 
 export default function BrowseRoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -20,6 +21,38 @@ export default function BrowseRoomsPage() {
   const navigate = useNavigate();
   const { connectSocket, joinRoom, currentRoom } = useRoomStore();
   const { user } = useAuthStore();
+  const [roomCodeInput, setRoomCodeInput] = useState('');
+
+  const handleJoinByCode = async () => {
+    const code = roomCodeInput.trim().toLowerCase();
+    if (!code) {
+      toast.error('Please enter a room code!');
+      return;
+    }
+    const regex = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
+    if (!regex.test(code)) {
+      toast.error('Invalid format. Use: abc-defg-hij');
+      return;
+    }
+    
+    let exists = rooms.some(r => r.id === code);
+    if (!exists) {
+      try {
+        const { data } = await roomsApi.active();
+        exists = data.some((r: any) => r.id === code);
+      } catch (err) {
+        console.error('Failed to verify room code', err);
+      }
+    }
+    
+    if (!exists) {
+      toast.error('Room not found or has been closed!');
+      return;
+    }
+    
+    joinRoom(code);
+    navigate(`/speaking/${code}`);
+  };
 
   const fetchRooms = async () => {
     setLoading(true);
@@ -79,6 +112,22 @@ export default function BrowseRoomsPage() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
+            </div>
+
+            {/* Join by Code Input */}
+            <div className="flex items-center gap-2">
+              <input
+                className="input-field px-4 py-2.5 w-40 text-sm bg-navy/40 border-ghost focus:border-cyan text-[#F0F4FF] outline-none rounded-xl font-mono text-center"
+                placeholder="abc-defg-hij"
+                value={roomCodeInput}
+                onChange={e => setRoomCodeInput(e.target.value)}
+              />
+              <Button
+                onClick={handleJoinByCode}
+                className="bg-cyan text-void font-bold text-xs h-[42px] px-4 whitespace-nowrap shadow-[0_0_15px_rgba(0,245,255,0.15)] hover:shadow-[0_0_25px_rgba(0,245,255,0.3)] transition-all"
+              >
+                Join Code
+              </Button>
             </div>
 
             {/* Language Selection Filter */}

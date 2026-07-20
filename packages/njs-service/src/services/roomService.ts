@@ -49,6 +49,65 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
   const userPersonaId = socket.data.userPersonaId;
   const userRole = socket.data.userRole;
 
+  socket.on('knock-room', ({ roomId, user }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData) return socket.emit('knock-failed', { message: 'Room not found' });
+
+    const isAlreadyParticipant = roomData.room.participants.some(p => p.oderId === user.id);
+    if (roomData.room.hostId === user.id || isAlreadyParticipant) {
+      return socket.emit('knock-approved', { roomId });
+    }
+
+    const hostId = roomData.room.hostId;
+    const hostSockets = roomData.userSockets?.get(hostId);
+    if (!hostSockets || hostSockets.size === 0) {
+      return socket.emit('knock-failed', { message: 'Host is not in the lobby yet. Please wait for the host to join.' });
+    }
+
+    hostSockets.forEach(hSockId => {
+      io.to(hSockId).emit('join-request-received', {
+        roomId,
+        user: {
+          id: user.id,
+          name: userName || 'Anonymous Student',
+          personaId: userPersonaId,
+          role: userRole
+        },
+        socketId: socket.id
+      });
+    });
+
+    socket.emit('knock-waiting');
+  });
+
+  socket.on('approve-knock', ({ roomId, targetSocketId }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData) return;
+
+    if (roomData.room.hostId !== socket.data.userId) {
+      return socket.emit('error', { message: 'Only the host can approve join requests' });
+    }
+
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (targetSocket) {
+      targetSocket.emit('knock-approved', { roomId });
+    }
+  });
+
+  socket.on('deny-knock', ({ roomId, targetSocketId }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData) return;
+
+    if (roomData.room.hostId !== socket.data.userId) {
+      return socket.emit('error', { message: 'Only the host can deny join requests' });
+    }
+
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (targetSocket) {
+      targetSocket.emit('knock-denied', { roomId });
+    }
+  });
+
   socket.on('join-room', ({ roomId, user }) => {
     const roomData = activeRooms.get(roomId);
     if (!roomData) return socket.emit('error', { message: 'Room not found' });
@@ -415,7 +474,19 @@ function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
 }
 
 export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 'pinnedContent' | 'participantCount'>): string {
-  const id = uuidv4();
+  let id = '';
+  do {
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    const rand = (len: number) => {
+      let s = '';
+      for (let i = 0; i < len; i++) {
+        s += letters[Math.floor(Math.random() * letters.length)];
+      }
+      return s;
+    };
+    id = `${rand(3)}-${rand(4)}-${rand(3)}`;
+  } while (activeRooms.has(id));
+
   const fullRoom: Room = {
     ...roomData,
     id,

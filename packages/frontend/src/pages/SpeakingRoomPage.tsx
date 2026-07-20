@@ -10,7 +10,20 @@ import { Button } from '@/components/ui/Button';
 export default function SpeakingRoomPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const { currentRoom, isConnected, joiningRoomId, joinRoom, connectSocket, joinAgoraChannel, agoraJoined, agoraJoining, agoraFailed } = useRoomStore();
+  const {
+    currentRoom,
+    isConnected,
+    joiningRoomId,
+    joinRoom,
+    connectSocket,
+    joinAgoraChannel,
+    agoraJoined,
+    agoraJoining,
+    agoraFailed,
+    knockStatus,
+    knockError,
+    resetKnock
+  } = useRoomStore();
   const { user, loginAsGuest } = useAuthStore();
 
   const [guestName, setGuestName] = useState(() => `Guest_${Math.floor(1000 + Math.random() * 9000)}`);
@@ -208,6 +221,79 @@ export default function SpeakingRoomPage() {
               </a>
             </p>
           </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (knockStatus === 'denied') {
+    return (
+      <div className="min-h-screen relative overflow-hidden bg-[#0B0B1A] flex items-center justify-center p-4">
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-20">
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative z-10 max-w-md glass rounded-3xl p-8 w-full border border-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.05)] text-center space-y-6"
+        >
+          <div className="mx-auto w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-2">
+            <span className="text-red-500 text-2xl font-bold font-orbitron">!</span>
+          </div>
+          <div>
+            <h2 className="font-orbitron font-black text-xl text-red-400 tracking-wider mb-2">
+              ACCESS DENIED
+            </h2>
+            <p className="text-xs text-mist font-inter leading-relaxed">
+              {knockError || 'The host denied your request to join this speaking room.'}
+            </p>
+          </div>
+          <Button
+            onClick={() => {
+              resetKnock();
+              navigate('/browse');
+            }}
+            className="w-full bg-red-500/80 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+          >
+            Back to Browse Lobbies
+          </Button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (knockStatus === 'knocking') {
+    return (
+      <div className="min-h-screen relative overflow-hidden bg-[#0B0B1A] flex items-center justify-center p-4">
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-20">
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+          <div className="absolute top-[20%] left-[20%] w-[50%] h-[50%] bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.12),transparent_50%)] blur-[90px]" />
+        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative z-10 max-w-md glass rounded-3xl p-8 w-full border border-ghost shadow-[0_0_30px_rgba(0,245,255,0.05)] text-center space-y-6"
+        >
+          <div className="mx-auto w-12 h-12 rounded-xl bg-cyan/10 border border-cyan/30 flex items-center justify-center mb-2">
+            <Loader2 className="w-6 h-6 text-cyan animate-spin" />
+          </div>
+          <div>
+            <h2 className="font-orbitron font-black text-xl text-[#F0F4FF] tracking-wider mb-2 uppercase">
+              Asking to join...
+            </h2>
+            <p className="text-xs text-mist font-inter leading-relaxed">
+              You'll join the speaking room as soon as the host admits you.
+            </p>
+          </div>
+          <Button
+            onClick={() => {
+              resetKnock();
+              navigate('/browse');
+            }}
+            className="w-full bg-[#1b1b3a] border border-ghost hover:border-cyan text-mist hover:text-cyan font-bold py-3 rounded-xl transition-all"
+          >
+            Cancel Request
+          </Button>
         </motion.div>
       </div>
     );

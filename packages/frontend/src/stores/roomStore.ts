@@ -90,6 +90,10 @@ interface RoomState {
 
   latencyMs: number | null;
   pingInterval: ReturnType<typeof setInterval> | null;
+
+  knockStatus: 'none' | 'knocking' | 'approved' | 'denied';
+  knockRequests: { socketId: string; user: { id: number; name: string; personaId: number; role: string } }[];
+  knockError: string | null;
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -125,6 +129,9 @@ interface RoomActions {
   pingUser: (targetUserId: number) => void;
   kickUser: (participantId: number) => void;
   toggleAutoTransition: (autoTransition: boolean) => void;
+  approveKnock: (roomId: string, targetSocketId: string) => void;
+  denyKnock: (roomId: string, targetSocketId: string) => void;
+  resetKnock: () => void;
 }
 
 type RoomStore = RoomState & RoomActions;
@@ -169,6 +176,10 @@ const initialState: RoomState = {
 
   latencyMs: null,
   pingInterval: null,
+
+  knockStatus: 'none',
+  knockRequests: [],
+  knockError: null,
 };
 
 // ─── Store ───────────────────────────────────────────────────────────────────
@@ -414,6 +425,41 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       }
     });
 
+    on('knock-waiting', () => {
+      set({ knockStatus: 'knocking', knockError: null });
+    });
+
+    on('knock-approved', (data: { roomId: string }) => {
+      set({ knockStatus: 'approved', knockError: null });
+      const user = useAuthStore.getState().user;
+      if (user) {
+        socket.emit('join-room', {
+          roomId: data.roomId,
+          user: {
+            id: user.id,
+            name: user.displayName,
+            personaId: user.personaId,
+            role: user.role,
+          },
+        });
+      }
+    });
+
+    on('knock-denied', () => {
+      set({ knockStatus: 'denied', knockError: 'The host has denied your request to join this speaking room.' });
+    });
+
+    on('knock-failed', (data: { message: string }) => {
+      set({ knockStatus: 'denied', knockError: data.message });
+    });
+
+    on('join-request-received', (data: { roomId: string; user: any; socketId: string }) => {
+      set(s => {
+        if (s.knockRequests.some(r => r.socketId === data.socketId)) return {};
+        return { knockRequests: [...s.knockRequests, { socketId: data.socketId, user: data.user }] };
+      });
+    });
+
     set({ socket });
     get().measureLatency();
   },
@@ -436,8 +482,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     const user = useAuthStore.getState().user;
     if (!user) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (socket as any).emit('join-room', {
+    (socket as any).emit('knock-room', {
       roomId,
       user: {
         id: user.id,
@@ -445,6 +490,34 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         personaId: user.personaId,
         role: user.role,
       },
+    });
+  },
+
+  approveKnock(roomId, targetSocketId) {
+    const { socket } = get();
+    if (socket?.connected) {
+      socket.emit('approve-knock', { roomId, targetSocketId });
+      set(s => ({
+        knockRequests: s.knockRequests.filter(r => r.socketId !== targetSocketId)
+      }));
+    }
+  },
+
+  denyKnock(roomId, targetSocketId) {
+    const { socket } = get();
+    if (socket?.connected) {
+      socket.emit('deny-knock', { roomId, targetSocketId });
+      set(s => ({
+        knockRequests: s.knockRequests.filter(r => r.socketId !== targetSocketId)
+      }));
+    }
+  },
+
+  resetKnock() {
+    set({
+      knockStatus: 'none',
+      knockError: null,
+      joiningRoomId: null,
     });
   },
 
