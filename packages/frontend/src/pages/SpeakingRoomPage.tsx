@@ -36,6 +36,19 @@ export default function SpeakingRoomPage() {
   const gainNodeRef = useRef<GainNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  // Validate roomId format on mount/change
+  useEffect(() => {
+    if (roomId) {
+      const regex = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
+      if (!regex.test(roomId)) {
+        import('react-hot-toast').then(({ toast }) => {
+          toast.error('Invalid room code format! Must be like abc-defg-hij');
+        });
+        navigate('/browse');
+      }
+    }
+  }, [roomId, navigate]);
+
   // Connect socket + join room
   useEffect(() => {
     if (user && roomId && !isConnected) {
