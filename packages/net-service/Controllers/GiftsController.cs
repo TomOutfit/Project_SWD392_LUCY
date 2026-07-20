@@ -30,7 +30,8 @@ public class GiftsController(AppDbContext db) : ControllerBase
     public async Task<IActionResult> Send([FromBody] SendGiftRequest req)
     {
         var senderId = GetUserId();
-        using var transaction = await db.Database.BeginTransactionAsync();
+        var isInMemory = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
+        var transaction = isInMemory ? null : await db.Database.BeginTransactionAsync();
         try
         {
             var sender = await db.Users.FindAsync(senderId);
@@ -81,13 +82,26 @@ public class GiftsController(AppDbContext db) : ControllerBase
             });
 
             await db.SaveChangesAsync();
-            await transaction.CommitAsync();
+            if (transaction != null)
+            {
+                await transaction.CommitAsync();
+            }
             return Ok(new { balance = sender.WalletBalance });
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync();
+            }
             return StatusCode(500, new { error = "An error occurred while processing the gift: " + ex.Message });
+        }
+        finally
+        {
+            if (transaction != null)
+            {
+                await transaction.DisposeAsync();
+            }
         }
     }
 
