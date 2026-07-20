@@ -16,6 +16,7 @@ import type { Request, Response } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import { resolveLatencyMdPath, appendLatencyRowToMd } from './utils/telemetry.js';
 import { getAnonymousName } from './utils/anonymous.js';
 
 const app = express();
@@ -64,55 +65,6 @@ const latencyBuffer: Array<{
 }> = [];
 const LATENCY_BUFFER_MAX = 500;
 
-/**
- * Resolve the absolute path to `document/latency_metrics.md`.
- *
- * Resolution order:
- *   1. LATENCY_MD_PATH  — explicit override (useful in Docker / CI)
- *   2. Walk up from process.cwd() looking for "document/latency_metrics.md"
- *      (works whether the process is started from packages/njs-service or the
- *       project root).
- */
-function resolveLatencyMdPath(): string | null {
-  // 1. Env override
-  if (process.env.LATENCY_MD_PATH) return process.env.LATENCY_MD_PATH;
-
-  // 2. Walk up at most 4 levels from cwd
-  let dir = process.cwd();
-  for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, 'document', 'latency_metrics.md');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break; // reached filesystem root
-    dir = parent;
-  }
-
-  return null;
-}
-
-function appendToLatencyMd(mdRow: string): void {
-  const mdFilePath = resolveLatencyMdPath();
-  if (mdFilePath) {
-    try {
-      fs.appendFileSync(mdFilePath, mdRow);
-    } catch (e) {
-      console.warn('[Telemetry] Could not write to latency_metrics.md:', e);
-    }
-  }
-}
-
-function formatMdRow(
-  now: Date,
-  endpointStr: string,
-  networkMs: number,
-  serverMs: number,
-  totalMs: number,
-  clientIp: string,
-): string {
-  const timestampMD = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-  return `| ${timestampMD} | ${endpointStr} | ~${networkMs.toFixed(2)} ms | ~${serverMs.toFixed(2)} ms | ~${totalMs.toFixed(2)} ms | Client IP: ${clientIp} |\n`;
-}
-
 function logLatencyEntry(
   now: Date,
   endpointStr: string,
@@ -137,8 +89,8 @@ function logLatencyEntry(
   });
   if (latencyBuffer.length > LATENCY_BUFFER_MAX) latencyBuffer.shift();
 
-  // Markdown file (written wherever the file is found — local dev only in most cases)
-  appendToLatencyMd(formatMdRow(now, endpointStr, networkMs, serverMs, totalMs, clientIp));
+  // Markdown file (routed to Section 5 or Section 6 depending on client IP)
+  appendLatencyRowToMd(now, endpointStr, networkMs, serverMs, totalMs, clientIp);
 }
 
 // ── Telemetry / Latency endpoints ─────────────────────────────────────────────

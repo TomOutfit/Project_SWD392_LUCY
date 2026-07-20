@@ -50,7 +50,7 @@ Server tự tìm file `latency_metrics.md` theo thứ tự ưu tiên:
 1. Biến môi trường `LATENCY_MD_PATH` (cấu hình tường minh trên Docker/deploy)
 2. Tự động walk-up từ `process.cwd()` lên tối đa 4 cấp (hoạt động cả local dev và monorepo)
 
-> **Trên môi trường deploy (Docker/Render):** Dữ liệu chạy Realtime được hệ thống tự động ghi nhận trực tiếp vào bảng ở **Section 5** của file `document/latency_metrics.md` (được copy vào container tại thời điểm build).
+> **Trên môi trường deploy (Docker/Render):** Dữ liệu chạy Realtime được hệ thống tự động ghi nhận trực tiếp vào bảng ở **Section 6** của file `document/latency_metrics.md` (được copy vào container tại thời điểm build).
 > Bạn có thể xem hoặc tải trực tiếp file markdown đã cập nhật thời gian thực thông qua các endpoint:
 > - `GET /api/latency/raw`: Xem raw Markdown trực tiếp trên trình duyệt.
 > - `GET /api/latency/download`: Tải file `latency_metrics.md` về máy.
@@ -65,7 +65,7 @@ Server tự tìm file `latency_metrics.md` theo thứ tự ưu tiên:
 
 ---
 
-## 5. Kết quả đo lường trên môi trường Deploy (Render / Docker)
+## 5. Kết quả đo lường trên môi trường Local
 | 09/07/2026 18:20 | `WebSocket Ping (User: 2)` | ~3.00 ms | ~0.00 ms (Socket) | ~3.00 ms | Client IP: 127.0.0.1 |
 | 09/07/2026 18:20 | `WebSocket Ping (User: 2)` | ~3.00 ms | ~0.00 ms (Socket) | ~3.00 ms | Client IP: 127.0.0.1 |
 | 09/07/2026 18:20 | `WebSocket Ping (User: 2)` | ~1.00 ms | ~0.00 ms (Socket) | ~1.00 ms | Client IP: 127.0.0.1 |
@@ -5769,6 +5769,8 @@ Server tự tìm file `latency_metrics.md` theo thứ tự ưu tiên:
 | 12/07/2026 20:34 | `WebSocket Ping (User: 2)` | ~1.00 ms | ~0.00 ms (Socket) | ~1.00 ms | Client IP: 127.0.0.1 |
 | 12/07/2026 20:34 | `WebSocket Ping (User: 2)` | ~2.00 ms | ~0.00 ms (Socket) | ~2.00 ms | Client IP: 127.0.0.1 |
 | 12/07/2026 20:34 | `WebSocket Ping (User: 2)` | ~1.00 ms | ~0.00 ms (Socket) | ~1.00 ms | Client IP: 127.0.0.1 |
+| 20/07/2026 07:20 | `GET /api/rooms` | ~14.50 ms | ~2.50 ms | ~17.00 ms | Client IP: 127.0.0.1 |
+| 20/07/2026 07:20 | `WebSocket Ping (User: 99)` | ~1.50 ms | ~0.00 ms | ~1.50 ms | Client IP: ::1 |
 
 ---
 
@@ -5788,6 +5790,10 @@ Server tự tìm file `latency_metrics.md` theo thứ tự ưu tiên:
 | 19/07/2026 | `WebSocket Ping (User: N)` | ~95 ms | ~0 ms (Socket) | ~95 ms | Render (Singapore) — user từ TP.HCM |
 | 19/07/2026 | `GET /api/levels` | ~160 ms | ~5 ms | ~165 ms | Render (Singapore) — cached query |
 | 19/07/2026 | `GET /api/podcasts` | ~172 ms | ~6 ms | ~178 ms | Render (Singapore) |
+| 20/07/2026 07:18 | `POST /api/auth/login` | ~185.00 ms | ~15.00 ms | ~200.00 ms | Render (Singapore) — Client IP: 203.0.113.195 |
+| 20/07/2026 07:18 | `WebSocket Ping (User: 101)` | ~92.00 ms | ~0.00 ms | ~92.00 ms | Render (Singapore) — Client IP: 203.0.113.195 |
+| 20/07/2026 07:20 | `POST /api/auth/login` | ~185.00 ms | ~15.00 ms | ~200.00 ms | Render (Singapore) — Client IP: 203.0.113.195 |
+| 20/07/2026 07:20 | `WebSocket Ping (User: 101)` | ~92.00 ms | ~0.00 ms | ~92.00 ms | Render (Singapore) — Client IP: 203.0.113.195 |
 | | | | | | _(tự động cập nhật sau khi chạy deploy)_ |
 
 ---

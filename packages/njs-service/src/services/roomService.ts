@@ -10,24 +10,9 @@ import { levels, rooms as roomsTable, podcasts } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
 
 import { generateRecommendationsFromPin } from './aiService.js';
+import { appendLatencyRowToMd } from '../utils/telemetry.js';
 
 // ── Latency helpers (shared with index.ts via module-level helpers) ───────────
-
-/** Walk up from cwd to find document/latency_metrics.md, or use LATENCY_MD_PATH env. */
-function resolveLatencyMdPathRS(): string | null {
-  if (process.env.LATENCY_MD_PATH) return process.env.LATENCY_MD_PATH;
-
-  let dir = process.cwd();
-  for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, 'document', 'latency_metrics.md');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  return null;
-}
 
 function appendWsLatency(
   now: Date,
@@ -43,17 +28,9 @@ function appendWsLatency(
   const logLine = `[${now.toISOString()}] [${clientIp}] User: ${userId} (${userRole}) - Socket.io Ping RTT: ${latencyMs}ms\n`;
   try { fs.appendFileSync(path.join(logsDir, 'websocket_latency.log'), logLine); } catch { /* non-fatal */ }
 
-  // Markdown file
-  const mdFilePath = resolveLatencyMdPathRS();
-  if (mdFilePath) {
-    const dd = now.getDate().toString().padStart(2, '0');
-    const mm = (now.getMonth() + 1).toString().padStart(2, '0');
-    const hh = now.getHours().toString().padStart(2, '0');
-    const min = now.getMinutes().toString().padStart(2, '0');
-    const timestampMD = `${dd}/${mm}/${now.getFullYear()} ${hh}:${min}`;
-    const mdRow = `| ${timestampMD} | \`WebSocket Ping (User: ${userId})\` | ~${Number(latencyMs).toFixed(2)} ms | ~0.00 ms (Socket) | ~${Number(latencyMs).toFixed(2)} ms | Client IP: ${clientIp} |\n`;
-    try { fs.appendFileSync(mdFilePath, mdRow); } catch { /* non-fatal */ }
-  }
+  // Markdown file (routed to Section 5 or Section 6 depending on client IP)
+  const endpointStr = `\`WebSocket Ping (User: ${userId})\``;
+  appendLatencyRowToMd(now, endpointStr, Number(latencyMs), 0, Number(latencyMs), clientIp);
 }
 
 // In-memory room state (production: use Redis)
