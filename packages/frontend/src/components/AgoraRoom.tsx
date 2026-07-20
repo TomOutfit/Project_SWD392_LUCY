@@ -255,7 +255,7 @@ export function AgoraRoom() {
               <p className="text-xs font-semibold text-cyan truncate">{pinnedContent.title}</p>
               {pinnedContent.url.startsWith('/uploads/') ? (
                 <a
-                  href={`${import.meta.env.VITE_NJS_URL || 'http://localhost:3001'}${pinnedContent.url}`}
+                  href={`${import.meta.env.VITE_NJS_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '')}${pinnedContent.url}`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-violet hover:text-cyan hover:underline flex items-center gap-1.5 mt-1 font-semibold"

@@ -489,7 +489,7 @@ export default function DashboardPage() {
                         <div className="text-right">
                           {pin.url.startsWith('/uploads/') ? (
                             <a
-                              href={`${import.meta.env.VITE_NJS_URL || 'http://localhost:3001'}${pin.url}`}
+                              href={`${import.meta.env.VITE_NJS_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '')}${pin.url}`}
                               target="_blank"
                               rel="noreferrer"
                               className="text-xs text-violet hover:text-cyan font-bold transition-colors"

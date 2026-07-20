@@ -9,6 +9,9 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   readonly VITE_NJS_URL?: string;
   readonly VITE_AGORA_APP_ID?: string;
+  readonly DEV: boolean;
+  readonly PROD: boolean;
+  readonly MODE: string;
 }
 
 interface ImportMeta {
