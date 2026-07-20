@@ -384,21 +384,32 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
 
     on('recording-started', () => {
-      get().startRecording();
+      const { currentRoom } = get();
+      const currentUser = useAuthStore.getState().user;
+      const isHost = currentRoom && currentUser && currentRoom.hostId === currentUser.id;
+      if (isHost) {
+        get().startRecording();
+      } else {
+        // Guest: just show the recording UI indicator
+        set({ isRecording: true, recordingTime: 0 });
+        const interval = setInterval(() => {
+          set((s) => ({ recordingTime: s.recordingTime + 1 }));
+        }, 1000);
+        set({ recordingInterval: interval });
+      }
     });
 
     on('recording-stopped', (data: { roomId: string; podcastId: string }) => {
       set({ currentPodcastId: data.podcastId });
       const { mediaRecorder, recordingInterval } = get();
 
-      if (!mediaRecorder) {
-        return;
-      }
-
-      if (mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-      }
       if (recordingInterval) clearInterval(recordingInterval);
+
+      if (mediaRecorder) {
+        if (mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      }
 
       set({
         isRecording: false,

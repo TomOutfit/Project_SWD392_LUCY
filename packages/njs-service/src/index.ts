@@ -185,6 +185,21 @@ app.post('/api/podcasts/:id/upload', upload.single('audio'), async (req, res) =>
   }
 });
 
+app.post('/api/podcasts/:id/listen', async (req, res) => {
+  try {
+    const podcastList = await db.select().from(podcasts).where(eq(podcasts.id, req.params.id)).limit(1);
+    if (podcastList.length === 0) {
+      return res.status(404).json({ error: 'Podcast not found' });
+    }
+    const currentCount = podcastList[0].listenCount || 0;
+    await db.update(podcasts).set({ listenCount: currentCount + 1 }).where(eq(podcasts.id, req.params.id));
+    res.json({ success: true, listenCount: currentCount + 1 });
+  } catch (err) {
+    console.error('Failed to increment listen count:', err);
+    res.status(500).json({ error: 'Database update failed' });
+  }
+});
+
 const docStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = path.join(process.cwd(), 'uploads', 'documents');

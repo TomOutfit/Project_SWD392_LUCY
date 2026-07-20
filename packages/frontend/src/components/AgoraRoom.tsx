@@ -1,7 +1,7 @@
 // src/components/AgoraRoom.tsx
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX, UserMinus, Copy } from 'lucide-react';
+import { Mic, MicOff, Hand, HandMetal, PhoneOff, Pin, Film, Crown, Users, Gift, BookOpen, Wifi, Volume2, VolumeX, UserMinus, Copy, Loader2, Mic2 } from 'lucide-react';
 import { useRoomStore } from '@/stores/roomStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Avatar } from '@/components/ui/Avatar';
@@ -673,6 +673,12 @@ export function AgoraRoom() {
             <div className={`w-2 h-2 rounded-full ${currentRoom.state === 'Transition' ? 'bg-amber animate-pulse' : 'bg-pulse'}`} />
             {currentRoom.state === 'Transition' ? 'Stage Transition' : 'Active'}
           </div>
+          {isRecording && (
+            <div className="flex items-center gap-1.5 text-red-500 text-xs font-mono font-bold animate-pulse bg-red-500/10 border border-red-500/35 px-2 py-0.5 rounded shadow-[0_0_10px_rgba(239,68,68,0.1)]">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              <span>REC</span>
+            </div>
+          )}
           <div className="flex items-center gap-1 text-mist text-xs">
             <Users className="w-3.5 h-3.5" />
             {participants.length}
@@ -715,6 +721,47 @@ export function AgoraRoom() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {isHost && isSuper && (
+                  <div className="flex items-center gap-1.5">
+                    {isUploading ? (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-navy/60 border border-ghost text-xs text-mist font-exo font-bold">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan" />
+                        <span>Saving...</span>
+                      </div>
+                    ) : isRecording ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400 font-mono font-bold animate-pulse">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                          <span>{formatTime(recordingTime)}</span>
+                        </span>
+                        <Button
+                          variant="magenta"
+                          size="sm"
+                          onClick={() => {
+                            stopRecording();
+                            toast.success('Recording stopped! Saving...');
+                          }}
+                        >
+                          Stop
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          startRecording();
+                          toast.success('Recording started!');
+                        }}
+                        className="hover:bg-cyan/15 hover:text-cyan border border-ghost hover:border-cyan/30 text-mist"
+                      >
+                        <Mic2 className="w-4 h-4 mr-1.5" />
+                        Record
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 {!isHost && (
                   <Button
                     variant={handRaised ? 'magenta' : 'ghost'}
