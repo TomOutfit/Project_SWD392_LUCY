@@ -126,7 +126,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     if (!existing) {
       const isHost = roomData.room.hostId === user.id;
       const participant: Participant = {
-        oderId: user.id, oderName: userName, oderPersonaId: user.personaId,
+        oderId: user.id, oderName: user.name, oderPersonaId: user.personaId,
         oderRole: user.role, joinedAt: new Date().toISOString(),
         isMuted: !isHost, isSpeaking: isHost, handRaised: false,
         speakingDurationSec: 0, activeSpeakingTimeSec: 0,
@@ -140,6 +140,10 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
         .where(eq(roomsTable.id, roomId))
         .catch(err => console.error('[roomService] Failed to update participantCount:', err));
 
+      // Sync socket identity to API userId so close-room emit uses correct IDs
+      socket.data.userId = user.id;
+      socket.data.userName = user.name;
+
       socket.join(roomId);
       socket.data.currentRoom = roomId;
       socket.emit('room-joined', { room: roomData.room, userId: user.id });
@@ -148,6 +152,10 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       socket.to(roomId).emit('hand-queue-updated', { roomId, queue: roomData.handQueue });
       fetchAndEmitRecommendations(io, roomId, roomData.room);
     } else {
+      // Sync socket identity to API userId so close-room emit uses correct IDs
+      socket.data.userId = user.id;
+      socket.data.userName = user.name;
+
       socket.join(roomId);
       socket.data.currentRoom = roomId;
       socket.emit('room-joined', { room: roomData.room, userId: user.id });
