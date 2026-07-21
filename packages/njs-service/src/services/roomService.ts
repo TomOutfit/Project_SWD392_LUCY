@@ -128,7 +128,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       const participant: Participant = {
         oderId: user.id, oderName: user.name, oderPersonaId: user.personaId,
         oderRole: user.role, joinedAt: new Date().toISOString(),
-        isMuted: !isHost, isSpeaking: isHost, handRaised: false,
+        isMuted: !isHost, isSpeaking: false, handRaised: false,
         speakingDurationSec: 0, activeSpeakingTimeSec: 0,
         speakGranted: isHost,
       };

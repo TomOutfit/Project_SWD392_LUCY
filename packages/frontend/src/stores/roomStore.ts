@@ -98,6 +98,7 @@ interface RoomState {
   speechRecognition: ISpeechRecognition | null;
   detectedLanguage: string | null;
   lastLanguageEmitTime: number;
+  myUserId: number | null;
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ interface RoomActions {
   handLower: () => void;
   toggleHand: () => void;
   toggleMute: () => void;
+  unmuteSelf: () => void;
   grantSpeak: (participantId: number) => void;
   revokeSpeak: (participantId: number) => void;
   forceStageTransition: () => void;
@@ -189,6 +191,7 @@ const initialState: RoomState = {
   speechRecognition: null,
   detectedLanguage: null,
   lastLanguageEmitTime: 0,
+  myUserId: null,
 };
 
 // ─── Store ───────────────────────────────────────────────────────────────────
@@ -196,6 +199,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   ...initialState,
 
   connectSocket(userId, userName, userPersonaId, userRole, _roomId?) {
+    set({ myUserId: userId });
     const existing = get().socket;
     if (existing?.connected) return;
 
@@ -324,8 +328,11 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       set({ handQueue: data.queue });
     });
 
-    on('speak-granted', (data: { oderId: number }) => {
+    on('speak-granted', (data: { roomId: string; oderId: number }) => {
       const { oderId } = data;
+      const myId = get().myUserId;
+      const isMe = oderId === myId;
+
       set((s) => ({
         participants: s.participants.map((p) =>
           p.oderId === oderId
@@ -333,6 +340,11 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
             : p,
         ),
       }));
+
+      // If the host granted MY request → auto-unmute the microphone so I can speak
+      if (isMe) {
+        get().unmuteSelf();
+      }
     });
 
     on('speak-revoked', (data: { oderId: number }) => {
@@ -398,7 +410,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       if (!user) return;
 
       const myData = batch.find(p => p.oderId === user.id);
-      console.error('[xp-earned-batch] batch=', batch, 'myUserId=', user.id, 'myData=', myData);
+      console.log('[xp-earned-batch] batch=', batch, 'myUserId=', user.id, 'myData=', myData);
       if (!myData) return;
 
       if (myData.xpEarned > 0) {
@@ -408,9 +420,11 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       import('react-hot-toast').then(({ toast }) => {
         const mins = Math.floor(myData.validatedSpeakingTimeSec / 60);
         const secs = myData.validatedSpeakingTimeSec % 60;
+        // Anonymize name: stable anonymous identifier per user
+        const anonName = `Student #${(myData.oderId % 999) + 1}`;
         toast.success(
           `Session Complete! 🎉\n` +
-          `${myData.oderName} — You spoke for ` +
+          `${anonName} — You spoke for ` +
           `${mins}m ${secs}s\n` +
           `→ +${myData.xpEarned} XP earned!`,
           { duration: 7000 }
@@ -742,6 +756,25 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     }
 
     set({ isMuted: newMuted, isSpeaking: !newMuted });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (socket as any).emit('toggle-mute', { roomId: currentRoom.id, muted: newMuted });
+  },
+
+  unmuteSelf() {
+    const { socket, currentRoom, localAudioTrack, audioContext } = get();
+    if (!socket || !currentRoom) return;
+    const newMuted = false;
+
+    if (localAudioTrack) {
+      localAudioTrack.setEnabled(true).catch((err) => {
+        console.error('[roomStore] Failed to set local audio track enabled:', err);
+      });
+    }
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+
+    set({ isMuted: newMuted, isSpeaking: true });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('toggle-mute', { roomId: currentRoom.id, muted: newMuted });
   },
