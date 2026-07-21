@@ -388,6 +388,33 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       window.dispatchEvent(new CustomEvent('lucy-kicked-from-room'));
     });
 
+    on('xp-earned', (data: {
+      oderId: number;
+      oderName: string;
+      validatedSpeakingTimeSec: number;
+      xpEarned: number;
+      totalSessionSec: number;
+      language: string;
+      levelName: string;
+    }) => {
+      const { user, updateXp } = useAuthStore.getState();
+      if (user && user.id === data.oderId) {
+        updateXp(data.xpEarned);
+      }
+
+      import('react-hot-toast').then(({ toast }) => {
+        const validatedMins = Math.floor(data.validatedSpeakingTimeSec / 60);
+        const validatedSecs = data.validatedSpeakingTimeSec % 60;
+        toast.success(
+          `Session Complete! 🎉\n` +
+          `${data.oderName} — You spoke in ${data.language} for ` +
+          `${validatedMins}m ${validatedSecs}s\n` +
+          `→ +${data.xpEarned} XP earned!`,
+          { duration: 7000 }
+        );
+      });
+    });
+
     on('pinned-content-updated', (data: { pin: ContentPin | null }) => {
       set({ pinnedContent: data.pin });
     });

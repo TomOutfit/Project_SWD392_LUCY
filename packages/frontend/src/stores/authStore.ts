@@ -16,6 +16,7 @@ interface AuthState {
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
   updateBalance: (balance: number) => void;
+  updateXp: (delta: number) => void;
   clearError: () => void;
 }
 
@@ -82,6 +83,11 @@ export const useAuthStore = create<AuthState>()(
       updateBalance: (balance) => {
         const user = get().user;
         if (user) set({ user: { ...user, walletBalance: balance } });
+      },
+
+      updateXp: (delta) => {
+        const user = get().user;
+        if (user) set({ user: { ...user, xp: (user.xp ?? 0) + delta } });
       },
 
       clearError: () => set({ error: null }),

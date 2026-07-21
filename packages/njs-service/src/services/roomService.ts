@@ -314,6 +314,28 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       console.error('[roomService] Failed to persist study session:', persistErr);
     }
 
+    // ── Emit XP summary to each participant before closing ──────────────────────
+    for (const p of participants) {
+      // Find the socket(s) for this userId
+      const socketIds = roomData.userSockets?.get(p.oderId);
+      if (socketIds) {
+        for (const sockId of socketIds) {
+          const targetSocket = io.sockets.sockets.get(sockId);
+          if (targetSocket) {
+            targetSocket.emit('xp-earned', {
+              oderId: p.oderId,
+              oderName: p.oderName,
+              validatedSpeakingTimeSec: p.validatedSpeakingTimeSec,
+              xpEarned: p.xpEarned,
+              totalSessionSec: totalDurationSec,
+              language: room.language,
+              levelName: room.levelName,
+            });
+          }
+        }
+      }
+    }
+
     io.to(roomId).emit('room-closed', { roomId });
     io.in(roomId).socketsLeave(roomId);
     activeRooms.delete(roomId);

@@ -9,6 +9,7 @@ export interface User {
   personaId: number;
   role: UserRole;
   walletBalance: number;
+  xp?: number;
   totalGiftsReceived?: number;
 }
 
