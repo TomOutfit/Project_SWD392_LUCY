@@ -47,11 +47,14 @@ export class RoomStageSubject implements Subject {
   async transitionToNextSubLevel(room: Room): Promise<void> {
     if (room.currentSubLevel < 12) {
       room.currentSubLevel++;
-      room.state = 'Transition' as any; // Temporary transition state
-      if (room.participantCount > 1) {
-        room.nextTransitionAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-      } else {
-        room.nextTransitionAt = undefined;
+      room.state = 'Transition' as any;
+
+      // Reset accumulated speaking metrics for the new sub-level
+      room.activeSpeakingTimeSec = 0;
+
+      // Reset per-participant active speaking counters
+      for (const p of room.participants) {
+        p.activeSpeakingTimeSec = 0;
       }
 
       // Notify observers that transition has started

@@ -45,8 +45,8 @@ export interface Room {
   participants?: Participant[];
   pinnedContent?: ContentPin | null;
   createdAt: string;
-  nextTransitionAt?: string;
-  autoTransition?: boolean;
+  /** Cumulative active speaking seconds for the current sub-level (Host decides when to transition). */
+  activeSpeakingTimeSec?: number;
 }
 
 export interface Participant {
@@ -60,6 +60,7 @@ export interface Participant {
   handRaised: boolean;
   handRaisedAt?: string;
   speakingDurationSec?: number;
+  activeSpeakingTimeSec?: number;
   speakGranted?: boolean;
 }
 

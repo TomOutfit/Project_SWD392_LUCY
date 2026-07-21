@@ -35,9 +35,9 @@ export interface Room {
   participants: Participant[];
   pinnedContent: ContentPin | null;
   createdAt?: string;
-  nextTransitionAt?: string;
   participantCount: number;
-  autoTransition?: boolean;
+  /** Cumulative active speaking seconds for the current sub-level (Host decides when to transition). */
+  activeSpeakingTimeSec?: number;
 }
 
 export interface Participant {
@@ -50,7 +50,10 @@ export interface Participant {
   isSpeaking: boolean;
   handRaised: boolean;
   handRaisedAt?: string;
+  /** Cumulative wall-clock seconds (legacy, counts while unmuted & speaking — may drift) */
   speakingDurationSec?: number;
+  /** Cumulative ACTIVE speaking seconds (only increments when actually producing audio) */
+  activeSpeakingTimeSec?: number;
   speakGranted?: boolean;
 }
 

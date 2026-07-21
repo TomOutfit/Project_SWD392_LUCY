@@ -128,7 +128,6 @@ interface RoomActions {
   measureLatency: () => void;
   pingUser: (targetUserId: number) => void;
   kickUser: (participantId: number) => void;
-  toggleAutoTransition: (autoTransition: boolean) => void;
   approveKnock: (roomId: string, targetSocketId: string) => void;
   denyKnock: (roomId: string, targetSocketId: string) => void;
   resetKnock: () => void;
@@ -652,13 +651,6 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     if (!socket || !currentRoom) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('force-stage-transition', { roomId: currentRoom.id });
-  },
-
-  toggleAutoTransition(autoTransition) {
-    const { socket, currentRoom } = get();
-    if (!socket || !currentRoom) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (socket as any).emit('toggle-auto-transition', { roomId: currentRoom.id, autoTransition });
   },
 
   // ── Content ──────────────────────────────────────────────────────────────────

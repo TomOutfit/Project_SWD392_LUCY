@@ -40,7 +40,6 @@ export function AgoraRoom() {
   const volumeBarRef = useRef<HTMLDivElement>(null);
   const sidebarVolumeBarRef = useRef<HTMLDivElement>(null);
   const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([]);
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
   // Peer-to-peer pinging state
@@ -139,20 +138,13 @@ export function AgoraRoom() {
   };
 
 
+  // Refresh speaking metrics whenever the server pushes an update
+  const [speakingTime, setSpeakingTime] = useState<number>(0);
   useEffect(() => {
-    if (!currentRoom?.nextTransitionAt) {
-      setTimeLeft(null);
-      return;
-    }
-    const updateTime = () => {
-      const diffMs = new Date(currentRoom.nextTransitionAt!).getTime() - Date.now();
-      const diffSec = Math.max(0, Math.floor(diffMs / 1000));
-      setTimeLeft(diffSec);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [currentRoom?.nextTransitionAt]);
+    if (!currentRoom) { setSpeakingTime(0); return; }
+    // Sync from server state (updated every second by background ticker)
+    setSpeakingTime(currentRoom.activeSpeakingTimeSec ?? 0);
+  }, [currentRoom?.activeSpeakingTimeSec]);
 
   useEffect(() => {
     const getDevices = async () => {
@@ -607,19 +599,12 @@ export function AgoraRoom() {
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-xs text-mist">
                 {currentRoom.levelName} · Sub-level {currentRoom.currentSubLevel}/12
-                {timeLeft !== null ? (
-                  timeLeft > 0 ? (
-                    <span className="text-cyan font-mono ml-2 font-semibold">
-                      (Next: {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')})
-                    </span>
-                  ) : (
-                    <span className="text-rose-400 font-mono ml-2 font-semibold animate-pulse">
-                      {isHost ? "(Time's Up! Please advance)" : "(Waiting for host to advance...)"}
-                    </span>
-                  )
-                ) : (
-                  <span className="text-amber font-mono ml-2 text-[10px] font-bold uppercase tracking-wider">
-                    (Paused - Waiting for students)
+                <span className="text-violet-400 font-mono ml-2 font-semibold">
+                  🎙️ Speaking: {formatTime(speakingTime)}
+                </span>
+                {!participants.some(p => !p.isMuted && p.isSpeaking) && (
+                  <span className="ml-1.5 text-[10px] text-amber bg-amber/15 border border-amber/30 px-1.5 py-0.5 rounded font-exo font-bold uppercase tracking-wider">
+                    ⏸ No one talking
                   </span>
                 )}
               </p>
@@ -628,31 +613,12 @@ export function AgoraRoom() {
                   onClick={() => {
                     const { forceStageTransition } = useRoomStore.getState();
                     forceStageTransition();
-                    toast.success('Initiating sublevel transition...');
+                    toast.success('Moving to next sub-level...');
                   }}
-                  className="px-2 py-0.5 rounded bg-violet/20 hover:bg-violet/40 text-[10px] text-violet font-exo font-bold border border-violet/30 transition-all"
+                  className="px-2.5 py-0.5 rounded bg-violet/20 hover:bg-violet/40 text-[10px] text-violet font-exo font-bold border border-violet/30 transition-all"
                 >
-                  Force Next Sub-Level
+                  Next Sub-Level →
                 </button>
-              )}
-              {isHost && (
-                <label className="flex items-center gap-1.5 cursor-pointer ml-3 select-none">
-                  <input
-                    type="checkbox"
-                    checked={currentRoom.autoTransition ?? false}
-                    onChange={(e) => {
-                      const { toggleAutoTransition } = useRoomStore.getState();
-                      toggleAutoTransition(e.target.checked);
-                      toast.success(
-                        e.target.checked
-                          ? 'Auto stage transition enabled.'
-                          : 'Auto stage transition disabled.'
-                      );
-                    }}
-                    className="w-3.5 h-3.5 rounded border-ghost bg-void text-cyan focus:ring-0 focus:ring-offset-0"
-                  />
-                  <span className="text-[10px] text-mist font-exo font-semibold uppercase">Auto-Advance</span>
-                </label>
               )}
             </div>
           </div>
@@ -833,6 +799,14 @@ export function AgoraRoom() {
                     {p.oderId === currentRoom.hostId && (
                       <span title="Room Host">
                         <Crown className="w-3 h-3 text-amber" />
+                      </span>
+                    )}
+                    {p.activeSpeakingTimeSec !== undefined && p.activeSpeakingTimeSec > 0 && (
+                      <span
+                        className="text-[9px] font-mono px-1 py-0.5 rounded border text-violet-400 border-violet-400/30 bg-violet-400/10"
+                        title="Active speaking time this sub-level"
+                      >
+                        🎙 {formatTime(p.activeSpeakingTimeSec)}
                       </span>
                     )}
                   </div>
