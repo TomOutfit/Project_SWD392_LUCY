@@ -5,14 +5,18 @@ import { eq, desc } from 'drizzle-orm';
 
 const NET_SERVICE_URL = process.env.NET_SERVICE_URL || 'http://localhost:5001';
 
-async function fetchUserXpFromNetService(userId: number): Promise<number> {
+async function fetchUserXpFromNetService(userId: number): Promise<{ xp: number; failed?: boolean }> {
   try {
     const res = await fetch(`${NET_SERVICE_URL}/api/xp/user/${userId}`);
-    if (!res.ok) return 0;
+    if (!res.ok) {
+      console.warn(`[sessionController] net-service returned ${res.status} for user ${userId}`);
+      return { xp: 0, failed: true };
+    }
     const data = await res.json() as { xp: number };
-    return data.xp ?? 0;
-  } catch {
-    return 0;
+    return { xp: data.xp ?? 0 };
+  } catch (err) {
+    console.warn(`[sessionController] Failed to fetch XP from net-service for user ${userId}:`, err);
+    return { xp: 0, failed: true };
   }
 }
 
@@ -113,8 +117,8 @@ export async function getStudyLeaderboard(req: any, res: any) {
     // Fetch authoritative XP from net-service for each unique user (in parallel)
     const userIds = Array.from(userMap.keys());
     const xpResults = await Promise.all(userIds.map(async (uid) => {
-      const xp = await fetchUserXpFromNetService(uid);
-      return { uid, xp };
+      const result = await fetchUserXpFromNetService(uid);
+      return { uid, xp: result.xp };
     }));
     const xpMap = new Map(xpResults.map(r => [r.uid, r.xp]));
 
