@@ -12,6 +12,26 @@ import { and, eq } from 'drizzle-orm';
 import { generateRecommendationsFromPin } from './aiService.js';
 import { appendLatencyRowToMd } from '../utils/telemetry.js';
 
+const NET_SERVICE_URL = process.env.NET_SERVICE_URL || 'http://localhost:5001';
+
+async function recordXpToNetService(userId: number, xpEarned: number, roomId: string): Promise<void> {
+  if (xpEarned <= 0) return;
+  try {
+    await fetch(`${NET_SERVICE_URL}/api/xp/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        amount: xpEarned,
+        roomId,
+        description: `Study session: ${roomId}`,
+      }),
+    });
+  } catch (err) {
+    console.error('[roomService] Failed to record XP to net-service:', err);
+  }
+}
+
 // ── Latency helpers ───────────────────────────────────────────────────────────
 
 function appendWsLatency(
@@ -296,6 +316,11 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       xpEarned: (p.validatedSpeakingTimeSec ?? 0) * 2, // XP only from language-validated seconds
     }));
 
+    // Record XP to net-service for each participant (fire-and-forget, non-blocking)
+    for (const p of participants) {
+      recordXpToNetService(p.oderId, p.xpEarned, roomId);
+    }
+
     // Persist study session to DB (survives room closure)
     try {
       await db.insert(studySessions).values({
@@ -314,27 +339,16 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       console.error('[roomService] Failed to persist study session:', persistErr);
     }
 
-    // ── Emit XP summary to each participant before closing ──────────────────────
-    for (const p of participants) {
-      // Find the socket(s) for this userId
-      const socketIds = roomData.userSockets?.get(p.oderId);
-      if (socketIds) {
-        for (const sockId of socketIds) {
-          const targetSocket = io.sockets.sockets.get(sockId);
-          if (targetSocket) {
-            targetSocket.emit('xp-earned', {
-              oderId: p.oderId,
-              oderName: p.oderName,
-              validatedSpeakingTimeSec: p.validatedSpeakingTimeSec,
-              xpEarned: p.xpEarned,
-              totalSessionSec: totalDurationSec,
-              language: room.language,
-              levelName: room.levelName,
-            });
-          }
-        }
-      }
-    }
+    // ── Emit XP summary to every participant before closing ────────────────────
+    // Emit to ALL sockets in the room (including the host sender) so every
+    // client receives the batch BEFORE room-closed arrives and disconnects them.
+    const xpSummary = participants.map(p => ({
+      oderId: p.oderId,
+      oderName: p.oderName,
+      validatedSpeakingTimeSec: p.validatedSpeakingTimeSec,
+      xpEarned: p.xpEarned,
+    }));
+    io.to(roomId).emit('xp-earned-batch', xpSummary);
 
     io.to(roomId).emit('room-closed', { roomId });
     io.in(roomId).socketsLeave(roomId);

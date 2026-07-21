@@ -1,0 +1,41 @@
+using LucyNetService.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+
+namespace LucyNetService.Controllers;
+
+[ApiController]
+[Route("api/xp")]
+[Produces("application/json")]
+public class XpController(IXpService xpService) : ControllerBase
+{
+    [HttpPost("record")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RecordXp([FromBody] RecordXpRequest req)
+    {
+        if (req.UserId <= 0) return BadRequest(new { error = "Invalid userId" });
+        if (req.Amount <= 0) return BadRequest(new { error = "Amount must be positive" });
+
+        var result = await xpService.AddXpAsync(req.UserId, new AddXpRequest(req.Amount, req.RoomId, req.Description));
+        if (!result.IsSuccess) return BadRequest(new { error = result.Error });
+        return Ok(new { xp = result.Xp });
+    }
+
+    [HttpGet("user/{userId:int}")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetUserXp(int userId)
+    {
+        if (userId <= 0) return BadRequest(new { error = "Invalid userId" });
+
+        var result = await xpService.GetUserXpAsync(userId);
+        if (!result.IsSuccess) return BadRequest(new { error = result.Error });
+        return Ok(new { xp = result.Xp, history = result.History });
+    }
+}
+
+public record RecordXpRequest(int UserId, int Amount, string RoomId, string Description);

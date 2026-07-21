@@ -388,28 +388,30 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       window.dispatchEvent(new CustomEvent('lucy-kicked-from-room'));
     });
 
-    on('xp-earned', (data: {
+    on('xp-earned-batch', (batch: Array<{
       oderId: number;
       oderName: string;
       validatedSpeakingTimeSec: number;
       xpEarned: number;
-      totalSessionSec: number;
-      language: string;
-      levelName: string;
-    }) => {
+    }>) => {
       const { user, updateXp } = useAuthStore.getState();
-      if (user && user.id === data.oderId) {
-        updateXp(data.xpEarned);
+      if (!user) return;
+
+      const myData = batch.find(p => p.oderId === user.id);
+      if (!myData) return;
+
+      if (myData.xpEarned > 0) {
+        updateXp(myData.xpEarned);
       }
 
       import('react-hot-toast').then(({ toast }) => {
-        const validatedMins = Math.floor(data.validatedSpeakingTimeSec / 60);
-        const validatedSecs = data.validatedSpeakingTimeSec % 60;
+        const mins = Math.floor(myData.validatedSpeakingTimeSec / 60);
+        const secs = myData.validatedSpeakingTimeSec % 60;
         toast.success(
           `Session Complete! 🎉\n` +
-          `${data.oderName} — You spoke in ${data.language} for ` +
-          `${validatedMins}m ${validatedSecs}s\n` +
-          `→ +${data.xpEarned} XP earned!`,
+          `${myData.oderName} — You spoke for ` +
+          `${mins}m ${secs}s\n` +
+          `→ +${myData.xpEarned} XP earned!`,
           { duration: 7000 }
         );
       });

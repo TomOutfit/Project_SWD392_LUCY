@@ -3,6 +3,19 @@ import { db } from '../db/index.js';
 import { studySessions } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 
+const NET_SERVICE_URL = process.env.NET_SERVICE_URL || 'http://localhost:5001';
+
+async function fetchUserXpFromNetService(userId: number): Promise<number> {
+  try {
+    const res = await fetch(`${NET_SERVICE_URL}/api/xp/user/${userId}`);
+    if (!res.ok) return 0;
+    const data = await res.json() as { xp: number };
+    return data.xp ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function getSessionHistory(req: any, res: any) {
   try {
     const userId = parseInt(req.params.userId);
@@ -56,11 +69,10 @@ export async function getStudyLeaderboard(req: any, res: any) {
   try {
     const sessions = await db.select().from(studySessions);
 
-    // Aggregate XP per user across all sessions (as participant or host)
+    // Aggregate speaking stats per user across all sessions (as participant or host)
     const userMap = new Map<number, {
       userId: number;
       userName: string;
-      totalXp: number;
       totalSpeakingSec: number;
       totalValidatedSec: number;
       totalSessions: number;
@@ -71,7 +83,6 @@ export async function getStudyLeaderboard(req: any, res: any) {
       const hostEntry = userMap.get(session.hostId) ?? {
         userId: session.hostId,
         userName: session.hostName,
-        totalXp: 0,
         totalSpeakingSec: 0,
         totalValidatedSec: 0,
         totalSessions: 0,
@@ -87,13 +98,11 @@ export async function getStudyLeaderboard(req: any, res: any) {
           const entry = userMap.get(p.oderId) ?? {
             userId: p.oderId,
             userName: p.oderName,
-            totalXp: 0,
             totalSpeakingSec: 0,
             totalValidatedSec: 0,
             totalSessions: 0,
             totalDurationSec: 0,
           };
-          entry.totalXp += p.xpEarned ?? 0;
           entry.totalSpeakingSec += p.activeSpeakingTimeSec ?? 0;
           entry.totalValidatedSec += p.validatedSpeakingTimeSec ?? 0;
           userMap.set(p.oderId, entry);
@@ -101,11 +110,19 @@ export async function getStudyLeaderboard(req: any, res: any) {
       } catch { /* ignore parse errors */ }
     }
 
+    // Fetch authoritative XP from net-service for each unique user (in parallel)
+    const userIds = Array.from(userMap.keys());
+    const xpResults = await Promise.all(userIds.map(async (uid) => {
+      const xp = await fetchUserXpFromNetService(uid);
+      return { uid, xp };
+    }));
+    const xpMap = new Map(xpResults.map(r => [r.uid, r.xp]));
+
     const ranking = Array.from(userMap.values())
       .map(u => ({
         userId: u.userId,
         displayName: u.userName,
-        totalXp: u.totalXp,
+        totalXp: xpMap.get(u.userId) ?? 0,
         totalSpeakingSec: u.totalSpeakingSec,
         totalValidatedSec: u.totalValidatedSec,
         totalSessions: u.totalSessions,

@@ -15,6 +15,7 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 
 builder.Services.AddScoped<IGiftService, GiftService>();
 builder.Services.AddScoped<IWalletService, WalletService>();
+builder.Services.AddScoped<IXpService, XpService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
