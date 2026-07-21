@@ -28,7 +28,8 @@ export async function getSessionHistory(req: any, res: any) {
             totalDurationSec: s.totalDurationSec,
             createdAt: s.createdAt,
             closedAt: s.closedAt,
-            mySpeakingTimeSec: participantRecord?.activeSpeakingTimeSec ?? 0,
+            mySpeakingTimeSec: participantRecord?.activeSpeakingTimeSec ?? 0, // raw display time
+            myValidatedTimeSec: participantRecord?.validatedSpeakingTimeSec ?? 0, // XP-validated time
             myXpEarned: participantRecord?.xpEarned ?? 0,
             totalParticipants: participants.length,
           };
@@ -41,9 +42,10 @@ export async function getSessionHistory(req: any, res: any) {
     // Aggregate totals
     const totalXp = userSessions.reduce((sum, s) => sum + (s.myXpEarned ?? 0), 0);
     const totalSpeakingSec = userSessions.reduce((sum, s) => sum + (s.mySpeakingTimeSec ?? 0), 0);
+    const totalValidatedSec = userSessions.reduce((sum, s) => sum + (s.myValidatedTimeSec ?? 0), 0);
     const totalSessions = userSessions.length;
 
-    return res.json({ sessions: userSessions, totalXp, totalSpeakingSec, totalSessions });
+    return res.json({ sessions: userSessions, totalXp, totalSpeakingSec, totalValidatedSec, totalSessions });
   } catch (err) {
     console.error('[sessionController] getSessionHistory error:', err);
     return res.status(500).json({ error: 'Failed to fetch session history' });
@@ -60,6 +62,7 @@ export async function getStudyLeaderboard(req: any, res: any) {
       userName: string;
       totalXp: number;
       totalSpeakingSec: number;
+      totalValidatedSec: number;
       totalSessions: number;
       totalDurationSec: number;
     }>();
@@ -70,6 +73,7 @@ export async function getStudyLeaderboard(req: any, res: any) {
         userName: session.hostName,
         totalXp: 0,
         totalSpeakingSec: 0,
+        totalValidatedSec: 0,
         totalSessions: 0,
         totalDurationSec: 0,
       };
@@ -85,11 +89,13 @@ export async function getStudyLeaderboard(req: any, res: any) {
             userName: p.oderName,
             totalXp: 0,
             totalSpeakingSec: 0,
+            totalValidatedSec: 0,
             totalSessions: 0,
             totalDurationSec: 0,
           };
-          entry.totalXp += p.xpEarned;
-          entry.totalSpeakingSec += p.activeSpeakingTimeSec;
+          entry.totalXp += p.xpEarned ?? 0;
+          entry.totalSpeakingSec += p.activeSpeakingTimeSec ?? 0;
+          entry.totalValidatedSec += p.validatedSpeakingTimeSec ?? 0;
           userMap.set(p.oderId, entry);
         }
       } catch { /* ignore parse errors */ }
@@ -101,6 +107,7 @@ export async function getStudyLeaderboard(req: any, res: any) {
         displayName: u.userName,
         totalXp: u.totalXp,
         totalSpeakingSec: u.totalSpeakingSec,
+        totalValidatedSec: u.totalValidatedSec,
         totalSessions: u.totalSessions,
         totalDurationSec: u.totalDurationSec,
       }))

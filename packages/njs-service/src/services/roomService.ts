@@ -292,7 +292,8 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       oderName: p.oderName,
       oderRole: p.oderRole,
       activeSpeakingTimeSec: p.activeSpeakingTimeSec ?? 0,
-      xpEarned: (p.activeSpeakingTimeSec ?? 0) * 2, // 2 XP per speaking second
+      validatedSpeakingTimeSec: p.validatedSpeakingTimeSec ?? 0,
+      xpEarned: (p.validatedSpeakingTimeSec ?? 0) * 2, // XP only from language-validated seconds
     }));
 
     // Persist study session to DB (survives room closure)
@@ -347,14 +348,15 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       if (pending > 0) {
         const participant = roomData.room.participants.find(p => p.oderId === odUserId);
         if (participant) {
-          participant.activeSpeakingTimeSec = (participant.activeSpeakingTimeSec ?? 0) + pending;
+          // Credit validated (XP) time — these seconds were spoken before detection arrived
+          participant.validatedSpeakingTimeSec = (participant.validatedSpeakingTimeSec ?? 0) + pending;
           // eslint-disable-next-line no-console
-          console.log(`[roomService] Credited ${pending} pending seconds for user ${odUserId} (lang match: ${lang})`);
+          console.log(`[roomService] Credited ${pending} validated seconds for user ${odUserId} (lang match: ${lang})`);
         }
         roomData.pendingCountdown.delete(odUserId);
       }
     } else {
-      // Wrong language — discard pending seconds silently
+      // Wrong language — discard pending seconds silently (they don't count toward XP)
       roomData.pendingCountdown.delete(odUserId);
     }
   });
@@ -541,15 +543,19 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
 
     for (const p of room.participants) {
       if (!p.isMuted && p.isSpeaking) {
+        // Always count — this is the RAW speaking time shown in the UI
+        p.activeSpeakingTimeSec = (p.activeSpeakingTimeSec ?? 0) + 1;
+
+        // Only count toward XP when the detected language matches the room target
         const detected = rd.userDetectedLanguage.get(p.oderId);
         if (detected) {
           const matches = detected.toLowerCase().startsWith(roomLangPrefix.toLowerCase());
           if (matches) {
-            p.activeSpeakingTimeSec = (p.activeSpeakingTimeSec ?? 0) + 1;
+            p.validatedSpeakingTimeSec = (p.validatedSpeakingTimeSec ?? 0) + 1;
           }
-          // else: wrong language — second NOT counted, silently discarded
+          // else: wrong language — validated time NOT incremented
         } else {
-          // First detection not yet arrived — count in pending buffer
+          // First detection not yet arrived — accumulate in pending buffer
           rd.pendingCountdown.set(p.oderId, (rd.pendingCountdown.get(p.oderId) ?? 0) + 1);
         }
       }

@@ -52,8 +52,18 @@ export interface Participant {
   handRaisedAt?: string;
   /** Cumulative wall-clock seconds (legacy, counts while unmuted & speaking — may drift) */
   speakingDurationSec?: number;
-  /** Cumulative ACTIVE speaking seconds (only increments when actually producing audio) */
+  /**
+   * Cumulative ACTIVE speaking seconds — increments every second a participant is
+   * unmuted and producing audio, regardless of detected language.
+   * Used for DISPLAY only.
+   */
   activeSpeakingTimeSec?: number;
+  /**
+   * Cumulative VALIDATED speaking seconds — only increments when the participant
+   * is speaking AND the detected language matches the room's target language.
+   * Used for XP calculation at session close.
+   */
+  validatedSpeakingTimeSec?: number;
   speakGranted?: boolean;
 }
 
