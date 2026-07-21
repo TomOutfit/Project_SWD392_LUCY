@@ -315,6 +315,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       validatedSpeakingTimeSec: p.validatedSpeakingTimeSec ?? 0,
       xpEarned: (p.validatedSpeakingTimeSec ?? 0) * 2, // XP only from language-validated seconds
     }));
+    console.log(`[roomService] close-room: roomId=${roomId}, hostId=${room.hostId}, participants count=${participants.length}`, participants.map(p => ({ id: p.oderId, name: p.oderName, xp: p.xpEarned })));
 
     // Record XP to net-service for each participant (fire-and-forget, non-blocking)
     for (const p of participants) {
