@@ -27,7 +27,8 @@ interface StudySession {
   totalDurationSec: number;
   createdAt: string;
   closedAt: string;
-  mySpeakingTimeSec: number;
+  mySpeakingTimeSec: number;   // raw display time
+  myValidatedTimeSec: number; // XP-validated time
   myXpEarned: number;
   totalParticipants: number;
 }

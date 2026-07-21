@@ -16,7 +16,31 @@ sqlite.pragma('journal_mode = WAL');
 
 export const db = drizzle(sqlite, { schema });
 
-// Initialize tables
+// ── Migration helpers ─────────────────────────────────────────────────────────
+function tableExists(tableName: string): boolean {
+  const row = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+  ).get(tableName) as { name: string } | undefined;
+  return !!row;
+}
+
+function columnExists(tableName: string, colName: string): boolean {
+  try {
+    const info = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    return info.some(c => c.name === colName);
+  } catch {
+    return false;
+  }
+}
+
+function addColumnIfMissing(table: string, col: string, type: string): void {
+  if (!columnExists(table, col)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    console.log(`[DB] Added column ${col} to ${table}`);
+  }
+}
+
+// ── Schema setup ──────────────────────────────────────────────────────────────
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS levels (
     id INTEGER PRIMARY KEY,
@@ -56,19 +80,26 @@ sqlite.exec(`
     created_at TEXT NOT NULL,
     listen_count INTEGER NOT NULL DEFAULT 0
   );
-  CREATE TABLE IF NOT EXISTS study_sessions (
-    id TEXT PRIMARY KEY,
-    room_id TEXT NOT NULL,
-    host_id INTEGER NOT NULL,
-    host_name TEXT NOT NULL,
-    language TEXT NOT NULL,
-    level_name TEXT NOT NULL,
-    participants_json TEXT NOT NULL,
-    total_duration_sec INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    closed_at TEXT NOT NULL
-  );
 `);
+
+// Ensure study_sessions table exists (handles both fresh DB and existing DB without the table)
+if (!tableExists('study_sessions')) {
+  sqlite.exec(`
+    CREATE TABLE study_sessions (
+      id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      host_id INTEGER NOT NULL,
+      host_name TEXT NOT NULL,
+      language TEXT NOT NULL,
+      level_name TEXT NOT NULL,
+      participants_json TEXT NOT NULL,
+      total_duration_sec INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      closed_at TEXT NOT NULL
+    );
+  `);
+  console.log('[DB] Created study_sessions table');
+}
 
 // Seed 100 levels
 const { count } = sqlite.prepare('SELECT COUNT(*) as count FROM levels').get() as { count: number };

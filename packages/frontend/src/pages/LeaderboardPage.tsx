@@ -13,6 +13,7 @@ interface StudyRankEntry {
   displayName: string;
   totalXp: number;
   totalSpeakingSec: number;
+  totalValidatedSec: number;
   totalSessions: number;
   totalDurationSec: number;
 }
@@ -43,7 +44,12 @@ export default function LeaderboardPage() {
       .finally(finish);
 
     sessionsApi.leaderboard()
-      .then(r => setStudyEntries(r.data || []))
+      .then(r => {
+        const data = r.data;
+        // Handle both array response and wrapped { ranking: [...] } response
+        const entries = Array.isArray(data) ? data : (data?.ranking ?? []);
+        setStudyEntries(entries);
+      })
       .catch(() => setStudyEntries([]))
       .finally(finish);
   }, []);
