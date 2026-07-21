@@ -7,6 +7,7 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import { getAllLevels, getLevelById, getLevelsByLanguage } from './controllers/levelController.js';
 import { getRooms, getPodcasts, getAgoraToken } from './controllers/roomController.js';
+import { getSessionHistory, getStudyLeaderboard, getRecentSessions } from './controllers/sessionController.js';
 import { registerSocketHandlers, createRoomInMemory, getActiveRooms, setIO, forceNextSublevel } from './services/roomService.js';
 import { RoomState } from './types/index.js';
 import db from './db/index.js';
@@ -312,6 +313,11 @@ app.get('/api/agora/token', getAgoraToken);
 
 // Get active rooms (for joining in-memory rooms)
 app.get('/api/rooms/active', (_, res) => res.json(getActiveRooms()));
+
+// Study session routes
+app.get('/api/sessions/user/:userId', getSessionHistory);
+app.get('/api/sessions/leaderboard', getStudyLeaderboard);
+app.get('/api/sessions/recent', getRecentSessions);
 
 // Socket.io authentication middleware
 io.use((socket, next) => {

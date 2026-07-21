@@ -6,7 +6,7 @@ import path from 'path';
 import { Language, RoomState, Participant, ContentPin, Room } from '../types/index.js';
 import { RoomStageSubject, SocketNotifierObserver, DbPersistenceObserver, MaterialRecommenderObserver } from './observer.js';
 import db from '../db/index.js';
-import { levels, rooms as roomsTable, podcasts } from '../db/schema.js';
+import { levels, rooms as roomsTable, podcasts, studySessions } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
 
 import { generateRecommendationsFromPin } from './aiService.js';
@@ -35,11 +35,13 @@ function appendWsLatency(
 
 const activeRooms = new Map<string, {
   room: Room;
-  speakingTimer?: NodeJS.Timeout; // only accumulates activeSpeakingTimeSec, never auto-transitions
+  speakingTimer?: NodeJS.Timeout; // only accumulates activeSpeakingTimeSec when language matches room.language
   subject?: RoomStageSubject;
   recording?: { id: string; startedAt: Date; creatorId: number };
   handQueue: Participant[];
   userSockets: Map<number, Set<string>>;
+  userDetectedLanguage: Map<number, string>; // userId → detected BCP-47 language tag
+  pendingCountdown: Map<number, number>; // userId → pending seconds awaiting language detection
 }>();
 
 export function registerSocketHandlers(io: Server, socket: Socket) {
@@ -273,6 +275,44 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     const roomData = activeRooms.get(roomId);
     if (!roomData || roomData.room.hostId !== socket.data.userId) return;
     if (roomData.speakingTimer) clearInterval(roomData.speakingTimer);
+
+    const room = roomData.room;
+    const now = new Date().toISOString();
+    const closedAt = now;
+
+    // Compute total session duration
+    const createdAt = room.createdAt ?? now;
+    const totalDurationSec = Math.max(0,
+      Math.floor((new Date(closedAt).getTime() - new Date(createdAt).getTime()) / 1000)
+    );
+
+    // Build participant records with XP earned
+    const participants = room.participants.map(p => ({
+      oderId: p.oderId,
+      oderName: p.oderName,
+      oderRole: p.oderRole,
+      activeSpeakingTimeSec: p.activeSpeakingTimeSec ?? 0,
+      xpEarned: (p.activeSpeakingTimeSec ?? 0) * 2, // 2 XP per speaking second
+    }));
+
+    // Persist study session to DB (survives room closure)
+    try {
+      await db.insert(studySessions).values({
+        id: uuidv4(),
+        roomId,
+        hostId: room.hostId,
+        hostName: room.hostName,
+        language: room.language,
+        levelName: room.levelName,
+        participantsJson: JSON.stringify(participants),
+        totalDurationSec,
+        createdAt,
+        closedAt,
+      });
+    } catch (persistErr) {
+      console.error('[roomService] Failed to persist study session:', persistErr);
+    }
+
     io.to(roomId).emit('room-closed', { roomId });
     io.in(roomId).socketsLeave(roomId);
     activeRooms.delete(roomId);
@@ -280,6 +320,42 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       await db.update(roomsTable).set({ isLive: false }).where(eq(roomsTable.id, roomId));
     } catch (err) {
       console.error('[roomService] Failed to mark room as closed in DB:', err);
+    }
+  });
+
+  // ── Language Detection ─────────────────────────────────────────────────────
+
+  /**
+   * Called by the frontend when Web Speech API detects the language the user is speaking.
+   * Language must match the room's target language to be counted toward speaking time.
+   *
+   * @param lang  BCP-47 language tag (e.g. 'en-US', 'zh-CN', 'ja-JP')
+   */
+  socket.on('speaking-language-detected', ({ roomId, lang }: { roomId: string; lang: string }) => {
+    const roomData = activeRooms.get(roomId);
+    if (!roomData) return;
+
+    const odUserId = socket.data.userId;
+    const roomLangPrefix = { EN: 'en', ZH: 'zh', JA: 'ja' }[roomData.room.language] ?? '';
+
+    // Store the detected language for this user
+    roomData.userDetectedLanguage.set(odUserId, lang);
+
+    // Credit pending seconds if this is the first detection and the language matches
+    if (roomLangPrefix && lang.toLowerCase().startsWith(roomLangPrefix.toLowerCase())) {
+      const pending = roomData.pendingCountdown.get(odUserId) ?? 0;
+      if (pending > 0) {
+        const participant = roomData.room.participants.find(p => p.oderId === odUserId);
+        if (participant) {
+          participant.activeSpeakingTimeSec = (participant.activeSpeakingTimeSec ?? 0) + pending;
+          // eslint-disable-next-line no-console
+          console.log(`[roomService] Credited ${pending} pending seconds for user ${odUserId} (lang match: ${lang})`);
+        }
+        roomData.pendingCountdown.delete(odUserId);
+      }
+    } else {
+      // Wrong language — discard pending seconds silently
+      roomData.pendingCountdown.delete(odUserId);
     }
   });
 
@@ -435,8 +511,20 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
   subject.attach(new MaterialRecommenderObserver(ioInstance));
 
   /**
-   * Background ticker: accumulates activeSpeakingTimeSec while anyone is speaking.
-   * NO auto-transition — Host decides when to move to the next sub-level.
+   * Maps room language code to BCP-47 prefix for language detection.
+   * Room 'EN' → 'en', Room 'ZH' → 'zh', Room 'JA' → 'ja'
+   */
+  const ROOM_LANG_PREFIX: Record<string, string> = {
+    EN: 'en',
+    ZH: 'zh',
+    JA: 'ja',
+  };
+
+  /**
+   * Background ticker: accumulates activeSpeakingTimeSec ONLY when the participant
+   * is speaking AND their detected language matches the room's target language.
+   * If language detection has not yet occurred, the second is counted in a "pending"
+   * buffer and will be credited / discarded once the first detection result arrives.
    */
   const speakingTimer = setInterval(() => {
     const rd = activeRooms.get(id);
@@ -446,24 +534,30 @@ export function createRoomInMemory(roomData: Omit<Room, 'id' | 'participants' | 
     }
 
     const room = rd.room;
-    const hasActiveSpeaker = room.participants.some(p => !p.isMuted && p.isSpeaking);
+    const roomLangPrefix = ROOM_LANG_PREFIX[room.language] ?? '';
 
-    if (hasActiveSpeaker) {
-      // Increment room-level active speaking counter
-      room.activeSpeakingTimeSec = (room.activeSpeakingTimeSec ?? 0) + 1;
+    // Increment room-level total timer (wall-clock, no language check)
+    room.activeSpeakingTimeSec = (room.activeSpeakingTimeSec ?? 0) + 1;
 
-      // Increment per-participant active speaking counter
-      for (const p of room.participants) {
-        if (!p.isMuted && p.isSpeaking) {
-          p.activeSpeakingTimeSec = (p.activeSpeakingTimeSec ?? 0) + 1;
+    for (const p of room.participants) {
+      if (!p.isMuted && p.isSpeaking) {
+        const detected = rd.userDetectedLanguage.get(p.oderId);
+        if (detected) {
+          const matches = detected.toLowerCase().startsWith(roomLangPrefix.toLowerCase());
+          if (matches) {
+            p.activeSpeakingTimeSec = (p.activeSpeakingTimeSec ?? 0) + 1;
+          }
+          // else: wrong language — second NOT counted, silently discarded
+        } else {
+          // First detection not yet arrived — count in pending buffer
+          rd.pendingCountdown.set(p.oderId, (rd.pendingCountdown.get(p.oderId) ?? 0) + 1);
         }
       }
     }
-    // NOTE: when no one is speaking, the counter simply pauses — no penalty.
 
   }, 1000);
 
-  activeRooms.set(id, { room: fullRoom, speakingTimer, subject, handQueue: [], userSockets: new Map() });
+  activeRooms.set(id, { room: fullRoom, speakingTimer, subject, handQueue: [], userSockets: new Map(), userDetectedLanguage: new Map(), pendingCountdown: new Map() });
   return id;
 }
 

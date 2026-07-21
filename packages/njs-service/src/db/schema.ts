@@ -42,6 +42,20 @@ export const podcasts = sqliteTable('podcasts', {
   listenCount: integer('listen_count').notNull().default(0),
 });
 
+export const studySessions = sqliteTable('study_sessions', {
+  id: text('id').primaryKey(),
+  roomId: text('room_id').notNull(),
+  hostId: integer('host_id').notNull(),
+  hostName: text('host_name').notNull(),
+  language: text('language').notNull(),
+  levelName: text('level_name').notNull(),
+  participantsJson: text('participants_json').notNull(), // JSON: [{userId, userName, oderRole, activeSpeakingTimeSec, xpEarned}]
+  totalDurationSec: integer('total_duration_sec').notNull(),
+  createdAt: text('created_at').notNull(),
+  closedAt: text('closed_at').notNull(),
+});
+
 export type LevelRow = typeof levels.$inferSelect;
 export type RoomRow = typeof rooms.$inferSelect;
 export type PodcastRow = typeof podcasts.$inferSelect;
+export type StudySessionRow = typeof studySessions.$inferSelect;

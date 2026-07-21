@@ -1,10 +1,10 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Mic, Gift, Pin, Clock, ArrowUpRight, Award, BarChart2, Shield, Eye } from 'lucide-react';
+import { Users, Mic, Gift, Pin, Clock, ArrowUpRight, Award, BarChart2, Shield, Eye, BookOpen, TrendingUp } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
-import { roomsApi } from '@/lib/api';
+import { roomsApi, sessionsApi } from '@/lib/api';
 import { Room } from '@/types/index';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
@@ -17,11 +17,29 @@ const giftStats = [
   { type: 'Heart ❤️', count: 64, value: 320, color: 'text-red-500' },
 ];
 
+interface StudySession {
+  id: string;
+  roomId: string;
+  hostId: number;
+  hostName: string;
+  language: string;
+  levelName: string;
+  totalDurationSec: number;
+  createdAt: string;
+  closedAt: string;
+  mySpeakingTimeSec: number;
+  myXpEarned: number;
+  totalParticipants: number;
+}
+
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'gifts' | 'materials'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'gifts' | 'materials' | 'history'>('overview');
   const [activeRooms, setActiveRooms] = useState<Room[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const [sessionHistory, setSessionHistory] = useState<StudySession[]>([]);
+  const [totalXp, setTotalXp] = useState(0);
+  const [totalSpeakingSec, setTotalSpeakingSec] = useState(0);
   const { user } = useAuthStore();
   const navigate = useNavigate();
 
@@ -52,6 +70,18 @@ export default function DashboardPage() {
       clearInterval(interval);
     };
   }, []);
+
+  // Load persisted study sessions from DB
+  useEffect(() => {
+    if (!user?.id) return;
+    sessionsApi.history(user.id)
+      .then(r => {
+        setSessionHistory(r.data?.sessions || []);
+        setTotalXp(r.data?.totalXp || 0);
+        setTotalSpeakingSec(r.data?.totalSpeakingSec || 0);
+      })
+      .catch(() => {});
+  }, [user?.id]);
 
   const filteredActiveRooms = user?.role === 'SUPER'
     ? activeRooms
@@ -114,7 +144,7 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-1.5 bg-navy p-1 rounded-xl border border-ghost">
-          {(['overview', 'students', 'gifts', 'materials'] as const).map((tab) => (
+          {(['overview', 'students', 'gifts', 'materials', 'history'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -502,6 +532,107 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* History Tab — Persisted Study Sessions */}
+          {activeTab === 'history' && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-6"
+            >
+              {/* Summary stats */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="card p-5 flex items-center justify-between border border-ghost bg-navy/35">
+                  <div>
+                    <p className="text-xs font-bold text-mist uppercase font-exo tracking-wider">Total XP Earned</p>
+                    <h3 className="font-orbitron font-black text-2xl mt-1 text-[#F0F4FF]">{totalXp.toLocaleString()}</h3>
+                    <span className="text-[10px] text-violet flex items-center gap-1 mt-1 font-exo font-semibold">
+                      <TrendingUp className="w-3 h-3" /> From speaking sessions
+                    </span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-violet/10 flex items-center justify-center border border-violet/20">
+                    <Award className="w-5 h-5 text-violet" />
+                  </div>
+                </div>
+
+                <div className="card p-5 flex items-center justify-between border border-ghost bg-navy/35">
+                  <div>
+                    <p className="text-xs font-bold text-mist uppercase font-exo tracking-wider">Speaking Time</p>
+                    <h3 className="font-orbitron font-black text-2xl mt-1 text-[#F0F4FF]">
+                      {Math.floor(totalSpeakingSec / 3600)}h {Math.floor((totalSpeakingSec % 3600) / 60)}m
+                    </h3>
+                    <span className="text-[10px] text-cyan flex items-center gap-1 mt-1 font-exo font-semibold">
+                      <Mic className="w-3 h-3" /> Total speaking practice
+                    </span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-cyan/10 flex items-center justify-center border border-cyan/20">
+                    <Clock className="w-5 h-5 text-cyan" />
+                  </div>
+                </div>
+
+                <div className="card p-5 flex items-center justify-between border border-ghost bg-navy/35">
+                  <div>
+                    <p className="text-xs font-bold text-mist uppercase font-exo tracking-wider">Sessions Attended</p>
+                    <h3 className="font-orbitron font-black text-2xl mt-1 text-[#F0F4FF]">{sessionHistory.length}</h3>
+                    <span className="text-[10px] text-magenta flex items-center gap-1 mt-1 font-exo font-semibold">
+                      <BookOpen className="w-3 h-3" /> Speaking rooms completed
+                    </span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-magenta/10 flex items-center justify-center border border-magenta/20">
+                    <Users className="w-5 h-5 text-magenta" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Session history table */}
+              <div className="bg-navy/20 border border-ghost rounded-2xl overflow-hidden">
+                <div className="p-5 border-b border-ghost flex items-center justify-between bg-navy/40">
+                  <h3 className="font-exo font-bold text-sm text-[#F0F4FF] uppercase tracking-wider">Session History</h3>
+                  <Badge variant="violet" className="font-bold">{sessionHistory.length} sessions</Badge>
+                </div>
+                {sessionHistory.length === 0 ? (
+                  <p className="text-xs text-mist/50 italic p-12 text-center">
+                    No completed sessions yet. Join a speaking room and start practicing to see your history here.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-ghost/60 bg-navy/45 text-mist text-[10px] uppercase font-exo tracking-wider">
+                          <th className="p-4">Room</th>
+                          <th className="p-4">Language</th>
+                          <th className="p-4">Level</th>
+                          <th className="p-4">Participants</th>
+                          <th className="p-4">Session Duration</th>
+                          <th className="p-4">Speaking Time</th>
+                          <th className="p-4 text-right">XP Earned</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ghost/30">
+                        {sessionHistory.map((s) => (
+                          <tr key={s.id} className="hover:bg-navy/35 transition-colors">
+                            <td className="p-4 text-xs text-[#F0F4FF] font-semibold">{s.hostName}'s Room</td>
+                            <td className="p-4"><Badge variant="cyan" className="text-[10px] font-bold">{s.language}</Badge></td>
+                            <td className="p-4 text-xs text-mist">{s.levelName}</td>
+                            <td className="p-4 text-xs text-mist">{s.totalParticipants}</td>
+                            <td className="p-4 text-xs font-mono text-mist">
+                              {Math.floor(s.totalDurationSec / 60)}m {s.totalDurationSec % 60}s
+                            </td>
+                            <td className="p-4 text-xs font-mono text-cyan">
+                              {Math.floor(s.mySpeakingTimeSec / 60)}m {s.mySpeakingTimeSec % 60}s
+                            </td>
+                            <td className="p-4 text-right">
+                              <span className="text-xs font-mono font-bold text-violet">+{s.myXpEarned} XP</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>

@@ -157,3 +157,9 @@ export const podcastsApi = {
   listen: (id: string) => njsApi.post(`/api/podcasts/${id}/listen`),
   updateTitle: (id: string, title: string) => njsApi.patch(`/api/podcasts/${id}`, { title }),
 };
+
+export const sessionsApi = {
+  history: (userId: number) => njsApi.get(`/api/sessions/user/${userId}`),
+  leaderboard: () => njsApi.get('/api/sessions/leaderboard'),
+  recent: (limit?: number) => njsApi.get('/api/sessions/recent', { params: { limit } }),
+};

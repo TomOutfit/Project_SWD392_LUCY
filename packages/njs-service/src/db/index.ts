@@ -56,6 +56,18 @@ sqlite.exec(`
     created_at TEXT NOT NULL,
     listen_count INTEGER NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS study_sessions (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    host_id INTEGER NOT NULL,
+    host_name TEXT NOT NULL,
+    language TEXT NOT NULL,
+    level_name TEXT NOT NULL,
+    participants_json TEXT NOT NULL,
+    total_duration_sec INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    closed_at TEXT NOT NULL
+  );
 `);
 
 // Seed 100 levels

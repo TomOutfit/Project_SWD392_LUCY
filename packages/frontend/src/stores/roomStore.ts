@@ -94,6 +94,10 @@ interface RoomState {
   knockStatus: 'none' | 'knocking' | 'approved' | 'denied';
   knockRequests: { socketId: string; user: { id: number; name: string; personaId: number; role: string } }[];
   knockError: string | null;
+
+  speechRecognition: ISpeechRecognition | null;
+  detectedLanguage: string | null;
+  lastLanguageEmitTime: number;
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -131,6 +135,8 @@ interface RoomActions {
   approveKnock: (roomId: string, targetSocketId: string) => void;
   denyKnock: (roomId: string, targetSocketId: string) => void;
   resetKnock: () => void;
+  startLanguageDetection: () => void;
+  stopLanguageDetection: () => void;
 }
 
 type RoomStore = RoomState & RoomActions;
@@ -179,6 +185,10 @@ const initialState: RoomState = {
   knockStatus: 'none',
   knockRequests: [],
   knockError: null,
+
+  speechRecognition: null,
+  detectedLanguage: null,
+  lastLanguageEmitTime: 0,
 };
 
 // ─── Store ───────────────────────────────────────────────────────────────────
@@ -526,8 +536,101 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
 
+  // ── Language Detection ─────────────────────────────────────────────────────
+
+  /**
+   * Maps room language code to BCP-47 locale for SpeechRecognition.
+   * e.g. 'EN' → 'en-US', 'ZH' → 'zh-CN', 'JA' → 'ja-JP'
+   */
+  startLanguageDetection() {
+    const { speechRecognition: existing } = get();
+    if (existing) return;
+
+    const { currentRoom, socket } = get();
+    if (!currentRoom || !socket) return;
+
+    const langMap: Record<string, string> = {
+      EN: 'en-US',
+      ZH: 'zh-CN',
+      JA: 'ja-JP',
+    };
+    const lang = langMap[currentRoom.language] ?? 'en-US';
+
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      // eslint-disable-next-line no-console
+      console.warn('[roomStore] SpeechRecognition not available in this browser');
+      return;
+    }
+
+    const recognition = new SR() as ISpeechRecognition;
+    recognition.lang = lang;
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const { currentRoom: room, socket: sock, lastLanguageEmitTime, detectedLanguage: prevLang } = get();
+      if (!room || !sock) return;
+
+      const last = event.results[event.results.length - 1];
+      if (!last.isFinal) return;
+
+      const transcript = (last[0] as any).transcript?.trim() ?? '';
+
+      // Detect language via character set heuristics as primary method.
+      // Web Speech API's lang property is not reliably exposed in TS types.
+      const isChinese = /[\u4e00-\u9fff]/.test(transcript);
+      const isJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(transcript);
+      // eslint-disable-next-line no-console
+      const detectedLang = isChinese ? 'zh-CN' : isJapanese ? 'ja-JP' : 'en-US';
+
+      // eslint-disable-next-line no-console
+      console.log(`[SpeechRecognition] detected: "${transcript}" → ${detectedLang}`);
+
+      // Debounce: only emit to server if 2 seconds have passed since last emit
+      const now = Date.now();
+      if (now - lastLanguageEmitTime < 2000 && prevLang === detectedLang) return;
+
+      set({ detectedLanguage: detectedLang, lastLanguageEmitTime: now });
+      sock.emit('speaking-language-detected', { roomId: room.id, lang: detectedLang });
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      // eslint-disable-next-line no-console
+      if (event.error !== 'no-speech') console.warn('[roomStore] SpeechRecognition error:', event.error);
+    };
+
+    recognition.onend = () => {
+      // Restart if room is still active
+      const { currentRoom: room, speechRecognition: sr } = get();
+      if (room && sr) {
+        try { sr.start(); } catch { /* already started */ }
+      }
+    };
+
+    try {
+      recognition.start();
+      set({ speechRecognition: recognition });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[roomStore] Could not start SpeechRecognition:', err);
+    }
+  },
+
+  stopLanguageDetection() {
+    const { speechRecognition: sr } = get();
+    if (sr) {
+      try { sr.stop(); } catch { /* noop */ }
+      set({ speechRecognition: null, detectedLanguage: null });
+    }
+  },
+
   leaveRoom() {
     const { socket, isConnected, pingInterval, selectedMicrophoneId, currentRoom, agoraJoined, recordingInterval } = get();
+
+    // Stop language detection when leaving room
+    get().stopLanguageDetection();
 
     if (recordingInterval) clearInterval(recordingInterval);
 
@@ -918,6 +1021,11 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         agoraJoined: true,
         agoraJoining: false,
       });
+
+      // Start language detection so speaking time is only counted
+      // when the user speaks in the room's target language
+      get().startLanguageDetection();
+
       // eslint-disable-next-line no-console
       console.log('[joinAgoraChannel] analyserNode set:', analyser, 'fftSize:', analyser.fftSize);
     } catch (err) {
