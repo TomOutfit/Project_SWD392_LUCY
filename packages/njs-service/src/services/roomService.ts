@@ -378,7 +378,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     // Store the detected language for this user
     roomData.userDetectedLanguage.set(odUserId, lang);
 
-    // Credit pending seconds if this is the first detection and the language matches
+    // Credit pending seconds whenever the language matches (handles user stop/restart cycles)
     if (roomLangPrefix && lang.toLowerCase().startsWith(roomLangPrefix.toLowerCase())) {
       const pending = roomData.pendingCountdown.get(odUserId) ?? 0;
       if (pending > 0) {

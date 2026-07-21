@@ -398,6 +398,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       if (!user) return;
 
       const myData = batch.find(p => p.oderId === user.id);
+      console.debug('[xp-earned-batch] received', { batch, myUserId: user.id });
       if (!myData) return;
 
       if (myData.xpEarned > 0) {
