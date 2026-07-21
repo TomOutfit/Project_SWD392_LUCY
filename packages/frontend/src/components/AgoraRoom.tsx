@@ -62,6 +62,10 @@ export function AgoraRoom() {
     giftEvents.forEach(evt => {
       if (!prevGiftEventsRef.current.includes(evt.id)) {
         prevGiftEventsRef.current.push(evt.id);
+        // Prevent unbounded growth — keep only the last 100 seen IDs
+        if (prevGiftEventsRef.current.length > 100) {
+          prevGiftEventsRef.current = prevGiftEventsRef.current.slice(-100);
+        }
         const gift = GIFT_TYPES.find(g => g.id === evt.giftType);
         const emoji = gift?.emoji || '🎁';
         const particleCount = evt.amount >= 500 ? 45 : evt.amount >= 100 ? 30 : evt.amount >= 15 ? 15 : 8;
@@ -230,8 +234,14 @@ export function AgoraRoom() {
           });
         }
       }
-    } catch {
-      toast.error('Failed to send gift');
+    } catch (err: any) {
+      // Show the server's error message (e.g. "Your account tier (PRO) can only send gifts up to $499")
+      const serverMsg = err?.response?.data?.error;
+      if (serverMsg) {
+        toast.error(serverMsg);
+      } else {
+        toast.error('Failed to send gift');
+      }
     }
   };
 

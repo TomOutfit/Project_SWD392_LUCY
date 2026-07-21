@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 import AgoraRTC, { IAgoraRTCClient, ILocalAudioTrack } from 'agora-rtc-sdk-ng';
-import { api, roomsApi } from '@/lib/api';
+import { api, roomsApi, podcastsApi } from '@/lib/api';
 import { Room, Participant, ContentPin, LevelContent } from '@/types/index';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -398,22 +398,17 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       }
     });
 
-    on('recording-stopped', (data: { roomId: string; podcastId: string }) => {
-      set({ currentPodcastId: data.podcastId });
-      const { mediaRecorder, recordingInterval } = get();
+    on('recording-stopped', (_data: any) => {
+      const { recordingInterval } = get();
 
       if (recordingInterval) clearInterval(recordingInterval);
 
-      if (mediaRecorder) {
-        if (mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      }
-
+      // Reset UI state immediately, but DO NOT clear currentPodcastId here —
+      // the MediaRecorder's final `ondataavailable` fires asynchronously after stop().
+      // We need podcastId to still be in state when that event arrives.
       set({
         isRecording: false,
         recordingTime: 0,
-        mediaRecorder: null,
         recordingInterval: null,
       });
     });
@@ -668,21 +663,37 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   // ── Recording ────────────────────────────────────────────────────────────────
 
   async uploadRecording(podcastId: string, chunks: Blob[]) {
-    const { currentRoom } = get();
-    if (!podcastId || !currentRoom) {
-      console.warn('[roomStore] uploadRecording: missing podcastId or room');
+    if (!podcastId) {
+      console.warn('[roomStore] uploadRecording: missing podcastId');
       return;
     }
 
-    set({ isUploading: true });
+    if (chunks.length === 0) {
+      console.warn('[roomStore] uploadRecording: no chunks to upload');
+      set({ isUploading: false, currentPodcastId: null });
+      return;
+    }
+
+    set({ isUploading: true, currentPodcastId: podcastId });
     try {
       const blob = new Blob(chunks, { type: 'audio/webm' });
       const formData = new FormData();
       formData.append('audio', blob, 'recording.webm');
-      await api.post(`/podcasts/${podcastId}/upload`, formData, {
+
+      const res = await api.post(`/podcasts/${podcastId}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      console.log('[roomStore] Recording uploaded:', podcastId);
+
+      if (res.status === 200) {
+        console.log('[roomStore] Recording uploaded, fileUrl:', res.data.fileUrl);
+
+        // Re-fetch the podcast to confirm fileUrl was persisted
+        const podcastRes = await podcastsApi.all();
+        const updated = podcastRes.data.find((p: any) => p.id === podcastId);
+        if (updated && !updated.fileUrl) {
+          console.error('[roomStore] fileUrl still empty after upload — check server DB');
+        }
+      }
     } catch (err) {
       console.error('[roomStore] Failed to upload recording:', err);
     } finally {
@@ -743,18 +754,20 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
+        // MediaRecorder fires one final ondataavailable after stop() with the remaining buffer.
+        // Wait until recorder is inactive to ensure we have ALL chunks before uploading.
+        if (recorder.state === 'inactive' && chunks.length > 0) {
+          const finalChunks = [...chunks];
+          chunks.length = 0;
+          const { currentPodcastId: pid } = get();
+          if (pid) get().uploadRecording(pid, finalChunks);
+        }
       };
 
       recorder.onstop = () => {
         audioContext.close();
         micStream.getTracks().forEach((t) => t.stop());
-        const finalChunks = [...chunks];
         set({ recordedChunks: [] });
-
-        const { currentPodcastId: podcastId, currentRoom: room } = get();
-        if (!podcastId || !room) return;
-
-        get().uploadRecording(podcastId, finalChunks);
       };
 
       recorder.start(1000);
@@ -778,23 +791,31 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     const { isRecording, mediaRecorder, recordingInterval, socket, currentRoom } = get();
     if (!isRecording || !mediaRecorder || mediaRecorder.state === 'inactive') return;
 
-    // Emit to server — server creates podcast record then broadcasts recording-stopped.
-    if (socket && currentRoom) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (socket as any).emit('stop-recording', { roomId: currentRoom.id });
-    }
-
-    mediaRecorder.stop();
     if (recordingInterval) clearInterval(recordingInterval);
+
+    // Store socket/room before clearing state
+    const roomId = currentRoom?.id ?? null;
+    const socketRef = socket;
 
     set({
       isRecording: false,
       recordingTime: 0,
       mediaRecorder: null,
       recordingInterval: null,
-      // Keep recordedChunks in state — upload is deferred to the recording-stopped handler
-      // where currentPodcastId is guaranteed to be set by the server.
     });
+
+    // Stop the recorder — fires ondataavailable (final chunk) then onstop.
+    // Upload is triggered by ondataavailable when recorder becomes inactive.
+    // We emit stop-recording AFTER stop() so the server durationSec matches
+    // the actual recording window, not a moment before the recorder fully stops.
+    mediaRecorder.stop();
+
+    // Emit to server only after stop() so durationSec is accurate.
+    // (The upload will follow asynchronously via ondataavailable → uploadRecording.)
+    if (socketRef && roomId) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (socketRef as any).emit('stop-recording', { roomId });
+    }
   },
 
   // ── Agora ────────────────────────────────────────────────────────────────────

@@ -37,6 +37,18 @@ public class GiftsController(AppDbContext db) : ControllerBase
             var sender = await db.Users.FindAsync(senderId);
             if (sender == null) return NotFound(new { error = "Sender not found" });
 
+            // Server-side role-based gift amount limits — enforce same rules as the client
+            var maxGift = sender.Role.ToUpperInvariant() switch
+            {
+                "SUPER" => (decimal?)null, // No limit
+                "PRO" => 499m,
+                _ => 49m  // "LUCY"
+            };
+            if (maxGift.HasValue && req.Amount > maxGift.Value)
+            {
+                return BadRequest(new { error = $"Your account tier ({sender.Role}) can only send gifts up to ${maxGift.Value:F0}" });
+            }
+
             // Support both real email and anonymous format: user_{id}@lucy.local
             User? recipient;
             if (req.RecipientEmail.EndsWith("@lucy.local"))

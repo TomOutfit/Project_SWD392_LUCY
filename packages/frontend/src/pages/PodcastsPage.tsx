@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic2, Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio } from 'lucide-react';
+import { Mic2, Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle } from 'lucide-react';
 import { podcastsApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Badge } from '@/components/ui/Badge';
@@ -23,6 +23,11 @@ export default function PodcastsPage() {
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Title editing state
+  const [editingPodcastId, setEditingPodcastId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (user && user.role === 'LUCY') {
@@ -132,6 +137,33 @@ export default function PodcastsPage() {
     }
   };
 
+  const startEditingTitle = (podcast: Podcast, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingPodcastId(podcast.id);
+    setEditingTitle(podcast.title);
+    setTimeout(() => titleInputRef.current?.select(), 0);
+  };
+
+  const saveTitle = async (podcastId: string) => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed) {
+      setEditingPodcastId(null);
+      return;
+    }
+    try {
+      await podcastsApi.updateTitle(podcastId, trimmed);
+      setPodcasts(prev => prev.map(p => p.id === podcastId ? { ...p, title: trimmed } : p));
+      setEditingPodcastId(null);
+    } catch {
+      console.error('[PodcastsPage] Failed to update podcast title');
+    }
+  };
+
+  const handleTitleKeyDown = (podcastId: string, e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') saveTitle(podcastId);
+    if (e.key === 'Escape') setEditingPodcastId(null);
+  };
+
   const formatDuration = (sec: number) => {
     if (isNaN(sec)) return '0:00';
     const m = Math.floor(sec / 60);
@@ -213,8 +245,14 @@ export default function PodcastsPage() {
                       : 'border-ghost/50 hover:border-cyan/30 bg-navy/30'
                   }`}
                 >
-                  {/* Image Cover/Gradient placeholder */}
                   <div className="relative h-36 rounded-xl bg-gradient-to-br from-violet/20 to-cyan/20 mb-4 overflow-hidden shadow-inner">
+                    {/* Missing audio indicator */}
+                    {(!podcast.fileUrl) && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-void/70 z-10" title="Audio not yet uploaded">
+                        <AlertCircle className="w-5 h-5 text-amber" />
+                        <span className="text-[10px] text-amber font-exo font-bold uppercase tracking-wider">No Audio</span>
+                      </div>
+                    )}
                     <div className="absolute inset-0 flex items-center justify-center bg-void/25 group-hover:bg-void/40 transition-colors duration-300">
                       <div className={`w-14 h-14 rounded-full glass border flex items-center justify-center shadow-lg transition-transform duration-300 ${
                         isActive ? 'border-cyan scale-105' : 'border-ghost/60 group-hover:scale-110'
@@ -245,11 +283,38 @@ export default function PodcastsPage() {
                     </div>
                   </div>
 
-                  <h3 className={`font-exo font-bold text-base mb-1 line-clamp-2 leading-snug transition-colors ${
-                    isActive ? 'text-cyan' : 'text-[#F0F4FF] group-hover:text-cyan'
-                  }`}>
-                    {podcast.title}
-                  </h3>
+                  {editingPodcastId === podcast.id ? (
+                    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                      <input
+                        ref={titleInputRef}
+                        value={editingTitle}
+                        onChange={e => setEditingTitle(e.target.value)}
+                        onKeyDown={e => handleTitleKeyDown(podcast.id, e)}
+                        className="flex-1 bg-navy border border-cyan/50 rounded px-2 py-0.5 text-xs font-exo font-bold text-cyan outline-none min-w-0"
+                        maxLength={120}
+                      />
+                      <button onClick={() => saveTitle(podcast.id)} className="text-emerald-400 hover:text-emerald-300 flex-shrink-0">
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 group/title">
+                      <h3 className={`font-exo font-bold text-base mb-1 line-clamp-2 leading-snug transition-colors flex-1 ${
+                        isActive ? 'text-cyan' : 'text-[#F0F4FF] group-hover/title:text-cyan'
+                      }`}>
+                        {podcast.title}
+                      </h3>
+                      {user?.role === 'SUPER' && (
+                        <button
+                          onClick={(e) => startEditingTitle(podcast, e)}
+                          className="opacity-0 group-hover/title:opacity-100 text-mist hover:text-cyan transition-all flex-shrink-0"
+                          title="Edit title"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <p className="text-xs text-mist mb-4 font-inter">
                     Hosted by <strong className="text-violet font-semibold">{podcast.creatorName}</strong> • {podcast.levelName}
                   </p>

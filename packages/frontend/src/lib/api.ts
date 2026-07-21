@@ -153,4 +153,5 @@ export const roomsApi = {
 export const podcastsApi = {
   all: () => njsApi.get('/api/podcasts'),
   listen: (id: string) => njsApi.post(`/api/podcasts/${id}/listen`),
+  updateTitle: (id: string, title: string) => njsApi.patch(`/api/podcasts/${id}`, { title }),
 };

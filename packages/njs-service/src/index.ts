@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveLatencyMdPath, appendLatencyRowToMd } from './utils/telemetry.js';
 import { getAnonymousName } from './utils/anonymous.js';
+import type { IAudioMetadata } from 'music-metadata';
 
 const app = express();
 const httpServer = createServer(app);
@@ -171,18 +172,80 @@ const storage = multer.diskStorage({
     cb(null, `${req.params.id}-${Date.now()}.webm`);
   }
 });
-const upload = multer({ storage });
 
-app.post('/api/podcasts/:id/upload', upload.single('audio'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
-  const fileUrl = `/uploads/podcasts/${req.file.filename}`;
-  try {
-    await db.update(podcasts).set({ fileUrl }).where(eq(podcasts.id, req.params.id));
-    res.json({ success: true, fileUrl });
-  } catch (err) {
-    console.error('Failed to update podcast fileUrl:', err);
-    res.status(500).json({ error: 'Database update failed' });
+// Only allow audio formats. Reject oversized or non-audio files.
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB cap
+  fileFilter: (req, file, cb) => {
+    const allowed = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/x-m4a', 'audio/aac'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Unsupported file type: ${file.mimetype}. Only audio files are allowed.`));
+    }
   }
+});
+
+app.post('/api/podcasts/:id/upload', (req: Request, res: Response) => {
+  const uploadHandler = multer({
+    storage,
+    limits: { fileSize: 100 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/x-m4a', 'audio/aac'];
+      if (allowed.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error(`Unsupported file type: ${file.mimetype}. Only audio files are allowed.`));
+      }
+    }
+  }).single('audio');
+
+  uploadHandler(req, res, async (err: any) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          res.status(400).json({ error: 'File too large. Maximum size is 100 MB.' });
+        } else {
+          res.status(400).json({ error: `Upload error: ${err.message}` });
+        }
+        return;
+      }
+      res.status(400).json({ error: err.message || 'Upload failed' });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).json({ error: 'No audio file provided' });
+      return;
+    }
+
+    const fileUrl = `/uploads/podcasts/${req.file.filename}`;
+    const filePath = req.file.path;
+
+    // Parse actual audio duration from the uploaded file using music-metadata
+    let actualDurationSec: number | null = null;
+    try {
+      const mm = await import('music-metadata');
+      const metadata: IAudioMetadata = await mm.parseFile(filePath);
+      actualDurationSec = Math.round(metadata.format.duration ?? 0);
+    } catch (parseErr) {
+      // music-metadata may fail for some webm variants; fall back gracefully
+      console.warn('[Upload] Could not parse audio duration from file:', parseErr);
+    }
+
+    try {
+      if (actualDurationSec !== null) {
+        await db.update(podcasts).set({ fileUrl, durationSec: actualDurationSec }).where(eq(podcasts.id, req.params.id));
+      } else {
+        await db.update(podcasts).set({ fileUrl }).where(eq(podcasts.id, req.params.id));
+      }
+      res.json({ success: true, fileUrl, durationSec: actualDurationSec });
+    } catch (dbErr: any) {
+      console.error('Failed to update podcast fileUrl:', dbErr);
+      res.status(500).json({ error: 'Database update failed' });
+    }
+  });
 });
 
 app.post('/api/podcasts/:id/listen', async (req, res) => {
@@ -197,6 +260,26 @@ app.post('/api/podcasts/:id/listen', async (req, res) => {
   } catch (err) {
     console.error('Failed to increment listen count:', err);
     res.status(500).json({ error: 'Database update failed' });
+  }
+});
+
+app.patch('/api/podcasts/:id', async (req: Request, res: Response) => {
+  const { title } = req.body as { title?: string };
+  if (!title || title.trim().length === 0) {
+    res.status(400).json({ error: 'Title is required' });
+    return;
+  }
+  try {
+    const existing = await db.select().from(podcasts).where(eq(podcasts.id, req.params.id)).limit(1);
+    if (existing.length === 0) {
+      res.status(404).json({ error: 'Podcast not found' });
+      return;
+    }
+    await db.update(podcasts).set({ title: title.trim() }).where(eq(podcasts.id, req.params.id));
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to update podcast title:', err);
+    res.status(500).json({ error: 'Failed to update title' });
   }
 });
 
