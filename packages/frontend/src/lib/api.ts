@@ -116,6 +116,8 @@ export const walletApi = {
   clearHistory: () => api.delete('/wallet'),
   sendGift: (data: { recipientEmail: string; roomId: string; giftType: string; amount: number }) =>
     api.post('/gifts/send', data),
+  supportCreator: (data: { creatorId: number; podcastId: string; podcastTitle: string; amount: number }) =>
+    api.post('/gifts/support', data),
 };
 
 // Levels

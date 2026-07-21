@@ -1,5 +1,7 @@
+using LucyNetService.Application.Interfaces;
+using LucyNetService.Application.Services;
 using LucyNetService.Data;
-using LucyNetService.Models;
+using LucyNetService.Domain.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -10,6 +12,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
     opt.UseInMemoryDatabase("LucyDb"));
+
+builder.Services.AddScoped<IGiftService, GiftService>();
+builder.Services.AddScoped<IWalletService, WalletService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

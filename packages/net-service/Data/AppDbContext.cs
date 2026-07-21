@@ -1,4 +1,4 @@
-using LucyNetService.Models;
+using LucyNetService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace LucyNetService.Data;

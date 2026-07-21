@@ -1,4 +1,4 @@
-namespace LucyNetService.Models;
+namespace LucyNetService.Domain.Entities;
 
 public class User
 {
@@ -7,7 +7,7 @@ public class User
     public string PasswordHash { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public int PersonaId { get; set; } = 1;
-    public string Role { get; set; } = "LUCY"; // LUCY | Pro | Super
+    public string Role { get; set; } = "LUCY";
     public decimal WalletBalance { get; set; } = 0;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -28,7 +28,7 @@ public class WalletLedger
     public int Id { get; set; }
     public int UserId { get; set; }
     public decimal Amount { get; set; }
-    public string Type { get; set; } = ""; // Deposit | GiftSent | GiftReceived
+    public string Type { get; set; } = "";
     public string Description { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

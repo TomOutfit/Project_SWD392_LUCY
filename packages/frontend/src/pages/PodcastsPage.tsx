@@ -2,12 +2,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic2, Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle } from 'lucide-react';
-import { podcastsApi } from '@/lib/api';
+import { Mic2, Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle, Heart } from 'lucide-react';
+import { podcastsApi, walletApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal';
 import { LANG_FLAGS } from '@/types/index';
 import type { Podcast } from '@/types/index';
+import toast from 'react-hot-toast';
 
 export default function PodcastsPage() {
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
@@ -28,6 +30,13 @@ export default function PodcastsPage() {
   const [editingPodcastId, setEditingPodcastId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Support modal state
+  const [supportModal, setSupportModal] = useState<{ podcast: Podcast; creatorName: string } | null>(null);
+  const [supportAmount, setSupportAmount] = useState<number>(10);
+  const [supportLoading, setSupportLoading] = useState(false);
+
+  const SUPPORT_AMOUNTS = [5, 10, 25, 50];
 
   useEffect(() => {
     if (user && user.role === 'LUCY') {
@@ -162,6 +171,36 @@ export default function PodcastsPage() {
   const handleTitleKeyDown = (podcastId: string, e: React.KeyboardEvent) => {
     if (e.key === 'Enter') saveTitle(podcastId);
     if (e.key === 'Escape') setEditingPodcastId(null);
+  };
+
+  const handleSupport = async () => {
+    if (!supportModal || !user) return;
+    setSupportLoading(true);
+    try {
+      const res = await walletApi.supportCreator({
+        creatorId: supportModal.podcast.creatorId,
+        podcastId: supportModal.podcast.id,
+        podcastTitle: supportModal.podcast.title,
+        amount: supportAmount,
+      });
+      if (res.status === 200) {
+        useAuthStore.getState().updateBalance(res.data.balance);
+        toast.success(`💛 Thank you for supporting ${supportModal.creatorName}!`);
+        setSupportModal(null);
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.error;
+      toast.error(msg || 'Support failed. Please try again.');
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
+  const isSupportAllowed = (price: number) => {
+    if (!user) return false;
+    if (user.role === 'SUPER') return true;
+    if (user.role === 'PRO') return price < 500;
+    return price < 50;
   };
 
   const formatDuration = (sec: number) => {
@@ -315,9 +354,20 @@ export default function PodcastsPage() {
                       )}
                     </div>
                   )}
-                  <p className="text-xs text-mist mb-4 font-inter">
+                  <p className="text-xs text-mist mb-3 font-inter">
                     Hosted by <strong className="text-violet font-semibold">{podcast.creatorName}</strong> • {podcast.levelName}
                   </p>
+
+                  {/* Support Creator — hidden for self */}
+                  {user && user.id !== podcast.creatorId && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSupportModal({ podcast, creatorName: podcast.creatorName }); }}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/30 hover:bg-pink-500/25 hover:border-pink-500/60 text-pink-400 hover:text-pink-300 text-xs font-exo font-bold transition-all mb-3"
+                    >
+                      <Heart className="w-3.5 h-3.5 fill-current" />
+                      Support this Super
+                    </button>
+                  )}
 
                   <div className="flex items-center justify-between pt-3 border-t border-ghost/40 text-xs text-mist font-mono">
                     <span>{podcast.listenCount} listens</span>
@@ -409,6 +459,79 @@ export default function PodcastsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Support Creator Modal */}
+      <Modal
+        isOpen={!!supportModal}
+        onClose={() => setSupportModal(null)}
+        title="💛 Support this Super"
+        size="sm"
+      >
+        {supportModal && (
+          <div className="space-y-4">
+            <p className="text-sm text-mist text-center">
+              Show some love to <strong className="text-violet">{supportModal.creatorName}</strong> for their podcast:
+            </p>
+            <p className="text-xs text-center text-mist/60 italic line-clamp-2 px-2">
+              "{supportModal.podcast.title}"
+            </p>
+
+            {/* Amount picker */}
+            <div className="grid grid-cols-4 gap-2">
+              {SUPPORT_AMOUNTS.map(amt => {
+                const allowed = isSupportAllowed(amt);
+                return (
+                  <button
+                    key={amt}
+                    disabled={!allowed}
+                    onClick={() => setSupportAmount(amt)}
+                    className={`py-2.5 rounded-xl border text-sm font-exo font-bold transition-all ${
+                      supportAmount === amt
+                        ? 'border-cyan bg-cyan/15 text-cyan'
+                        : !allowed
+                          ? 'border-ghost/30 opacity-40 cursor-not-allowed text-mist'
+                          : 'border-ghost hover:border-pink-500/50 text-[#F0F4FF] hover:text-pink-300'
+                    }`}
+                  >
+                    ${amt}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2">
+              {[5, 10].includes(supportAmount) && (
+                <input
+                  type="number"
+                  min={1}
+                  max={user?.role === 'SUPER' ? 10000 : user?.role === 'PRO' ? 499 : 49}
+                  value={supportAmount}
+                  onChange={e => setSupportAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                  className="flex-1 bg-navy border border-ghost rounded-lg px-3 py-2 text-sm text-[#F0F4FF] outline-none focus:border-pink-500/60"
+                  placeholder="Custom amount"
+                />
+              )}
+              <button
+                onClick={handleSupport}
+                disabled={supportLoading || !user || !isSupportAllowed(supportAmount) || supportAmount <= 0}
+                className={`flex-1 py-2.5 rounded-xl font-exo font-bold text-sm transition-all ${
+                  supportLoading
+                    ? 'bg-navy/50 text-mist cursor-not-allowed'
+                    : 'bg-gradient-to-r from-pink-500 to-violet-500 text-white hover:opacity-90 active:scale-95'
+                }`}
+              >
+                {supportLoading ? 'Sending...' : `Send $${supportAmount} 💛`}
+              </button>
+            </div>
+
+            {user && (
+              <p className="text-[10px] text-mist/50 text-center">
+                Your balance: <strong className="text-cyan">${user.walletBalance ?? 0}</strong>
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

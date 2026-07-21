@@ -1,5 +1,5 @@
 using LucyNetService.Data;
-using LucyNetService.Models;
+using LucyNetService.Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

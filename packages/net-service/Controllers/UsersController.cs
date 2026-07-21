@@ -1,4 +1,5 @@
 using LucyNetService.Data;
+using LucyNetService.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -64,7 +65,7 @@ public class UsersController(AppDbContext db) : ControllerBase
         if (await db.Users.AnyAsync(u => u.Email == req.Email.ToLower()))
             return Conflict(new { error = "Email already registered" });
 
-        var user = new Models.User
+        var user = new User
         {
             Email = req.Email.ToLower().Trim(),
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
