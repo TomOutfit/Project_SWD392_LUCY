@@ -1,5 +1,5 @@
 // src/pages/LeaderboardPage.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Trophy, TrendingUp, Sparkles, Medal, BookOpen, Mic } from 'lucide-react';
 import { usersApi, sessionsApi } from '@/lib/api';
@@ -18,11 +18,26 @@ interface StudyRankEntry {
   totalDurationSec: number;
 }
 
+async function fetchStudyLeaderboard(): Promise<StudyRankEntry[]> {
+  const r = await sessionsApi.leaderboard();
+  const data = r.data;
+  return Array.isArray(data) ? data : (data?.ranking ?? []);
+}
+
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [studyEntries, setStudyEntries] = useState<StudyRankEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'gifts' | 'study'>('gifts');
+
+  const refreshStudyRanking = useCallback(async () => {
+    try {
+      const data = await fetchStudyLeaderboard();
+      setStudyEntries(data);
+    } catch {
+      setStudyEntries([]);
+    }
+  }, []);
 
   useEffect(() => {
     let loaded = 0;
@@ -43,16 +58,16 @@ export default function LeaderboardPage() {
       .catch(() => setEntries([]))
       .finally(finish);
 
-    sessionsApi.leaderboard()
-      .then(r => {
-        const data = r.data;
-        // Handle both array response and wrapped { ranking: [...] } response
-        const entries = Array.isArray(data) ? data : (data?.ranking ?? []);
-        setStudyEntries(entries);
-      })
+    fetchStudyLeaderboard()
+      .then(setStudyEntries)
       .catch(() => setStudyEntries([]))
       .finally(finish);
-  }, []);
+
+    // Auto-refresh Study Ranking whenever a session ends and XP is earned
+    const handleXpEarned = () => refreshStudyRanking();
+    window.addEventListener('lucy-xp-earned', handleXpEarned);
+    return () => window.removeEventListener('lucy-xp-earned', handleXpEarned);
+  }, [refreshStudyRanking]);
 
   const getRankGlow = (rank: number) => {
     if (rank === 1) return 'border-amber shadow-[0_0_20px_rgba(255,191,0,0.25)] ring-1 ring-amber/50';

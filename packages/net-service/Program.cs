@@ -10,8 +10,14 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Data directory — mounted volume at /app/data in Docker, %LOCALAPPDATA%\LucyNetService locally.
+var dataDir = Environment.GetEnvironmentVariable("DATA_DIR") ?? Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LucyNetService");
+Directory.CreateDirectory(dataDir);
+var dbPath = Path.Combine(dataDir, "lucy.db");
+
 builder.Services.AddDbContext<AppDbContext>(opt =>
-    opt.UseInMemoryDatabase("LucyDb"));
+    opt.UseSqlite($"Data Source={dbPath}"));
 
 builder.Services.AddScoped<IGiftService, GiftService>();
 builder.Services.AddScoped<IWalletService, WalletService>();
@@ -90,6 +96,10 @@ app.Use(async (context, next) =>
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    // Create tables if they don't exist yet (SQLite only; no migrations needed)
+    await db.Database.EnsureCreatedAsync();
+
     var sampleAccounts = app.Configuration.GetSection("SampleAccounts").Get<List<SampleAccountConfig>>();
     if (sampleAccounts != null && sampleAccounts.Any())
     {

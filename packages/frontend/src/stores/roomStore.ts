@@ -417,6 +417,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         updateXp(myData.xpEarned);
       }
 
+      // Notify LeaderboardPage to refresh the Study Ranking tab automatically
+      window.dispatchEvent(new CustomEvent('lucy-xp-earned', { detail: { xpEarned: myData.xpEarned } }));
+
       import('react-hot-toast').then(({ toast }) => {
         const mins = Math.floor(myData.validatedSpeakingTimeSec / 60);
         const secs = myData.validatedSpeakingTimeSec % 60;

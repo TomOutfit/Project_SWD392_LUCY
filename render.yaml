@@ -46,6 +46,9 @@ services:
       - key: ASPNETCORE_URLS
         value: http://localhost:5001
 
+      - key: NET_SERVICE_URL
+        value: http://localhost:5001
+
       - key: NODE_ENV
         value: production
 

@@ -12,24 +12,71 @@ import { and, eq } from 'drizzle-orm';
 import { generateRecommendationsFromPin } from './aiService.js';
 import { appendLatencyRowToMd } from '../utils/telemetry.js';
 
-const NET_SERVICE_URL = process.env.NET_SERVICE_URL || 'http://localhost:5001';
+const NET_SERVICE_URL =
+  process.env.NET_SERVICE_URL ||
+  process.env.NET_SERVICE_BASE_URL || // Render sets this internally
+  'http://localhost:5001';
 
-async function recordXpToNetService(userId: number, xpEarned: number, roomId: string): Promise<void> {
+interface XpRecordPayload {
+  userId: number;
+  amount: number;
+  roomId: string;
+  description: string;
+}
+
+async function recordXpToNetService(
+  userId: number,
+  xpEarned: number,
+  roomId: string,
+): Promise<void> {
   if (xpEarned <= 0) return;
-  try {
-    await fetch(`${NET_SERVICE_URL}/api/xp/record`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        amount: xpEarned,
-        roomId,
-        description: `Study session: ${roomId}`,
-      }),
-    });
-  } catch (err) {
-    console.error('[roomService] Failed to record XP to net-service:', err);
+
+  const payload: XpRecordPayload = {
+    userId,
+    amount: xpEarned,
+    roomId,
+    description: `Study session: ${roomId}`,
+  };
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(`${NET_SERVICE_URL}/api/xp/record`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}));
+        console.log(
+          `[roomService] XP recorded for user ${userId}: +${xpEarned} (total: ${json.xp ?? '?'})`,
+        );
+        return;
+      }
+
+      const errBody = await res.text();
+      console.error(
+        `[roomService] XP record failed for user ${userId} (attempt ${attempt}/${maxAttempts}) — HTTP ${res.status}: ${errBody}`,
+      );
+    } catch (err) {
+      console.error(
+        `[roomService] XP record failed for user ${userId} (attempt ${attempt}/${maxAttempts}):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    if (attempt < maxAttempts) {
+      const delayMs = attempt * 1000; // 1s, 2s back-off
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
   }
+
+  // All retries exhausted — log for manual reconciliation
+  console.error(
+    `[roomService] ⚠ All ${maxAttempts} XP record attempts failed for user ${userId}. ` +
+    `Payload: ${JSON.stringify(payload)}. Manual compensation required.`,
+  );
 }
 
 // ── Latency helpers ───────────────────────────────────────────────────────────
