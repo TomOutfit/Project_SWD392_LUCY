@@ -11,6 +11,7 @@ import { RoomCardSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import type { Room, Language } from '@/types/index';
 import { LANG_FLAGS, LANG_NAMES } from '@/types/index';
+import { isRoomLevelLocked, getUserLevel } from '@/utils/levelUtils';
 import toast from 'react-hot-toast';
 
 export default function BrowseRoomsPage() {
@@ -35,18 +36,24 @@ export default function BrowseRoomsPage() {
       return;
     }
     
-    let exists = rooms.some(r => r.id === code);
-    if (!exists) {
+    let targetRoom = rooms.find(r => r.id === code);
+    if (!targetRoom) {
       try {
         const { data } = await roomsApi.active();
-        exists = data.some((r: any) => r.id === code);
+        targetRoom = data.find((r: any) => r.id === code);
       } catch (err) {
         console.error('Failed to verify room code', err);
       }
     }
     
-    if (!exists) {
+    if (!targetRoom) {
       toast.error('Room not found or has been closed!');
+      return;
+    }
+
+    if (isRoomLevelLocked(targetRoom.levelId, user?.xp, user?.role)) {
+      const userLvl = getUserLevel(user?.xp, user?.role);
+      toast.error(`🔒 Room Locked! Requires Level ${targetRoom.levelId} (Your level: Level ${userLvl}). Earn XP to unlock!`);
       return;
     }
     

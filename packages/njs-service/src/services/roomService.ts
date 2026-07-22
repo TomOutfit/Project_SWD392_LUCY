@@ -247,6 +247,22 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     const roomData = activeRooms.get(roomId);
     if (!roomData) return socket.emit('error', { message: 'Room not found' });
 
+    // Enforce Level Requirement Guard:
+    // SUPER roles (Hosts/Educators) have all levels unlocked.
+    // Regular learners are allowed rooms up to Level (XP/50 + 1 + 3 buffer).
+    if (user.role !== 'SUPER') {
+      const userXp = (user as any).xp ?? 0;
+      const baseLevel = Math.floor(userXp / 50) + 1;
+      const roleBonus = user.role === 'PRO' ? 10 : 0;
+      const maxAllowed = Math.min(100, baseLevel + roleBonus + 3);
+      if (roomData.room.levelId > maxAllowed) {
+        console.warn(`[roomService] Blocked user ${user.id} (${user.name}) from joining room ${roomId} (Room Lvl ${roomData.room.levelId} > Max ${maxAllowed})`);
+        return socket.emit('error', {
+          message: `🔒 Room Locked! Requires Level ${roomData.room.levelId} (Your current level limit: Level ${maxAllowed}). Earn XP to unlock!`
+        });
+      }
+    }
+
     if (!roomData.userSockets) roomData.userSockets = new Map();
     let socketsSet = roomData.userSockets.get(user.id) ?? new Set();
     const isNewUserConnection = socketsSet.size === 0;
