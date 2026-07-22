@@ -744,7 +744,7 @@ export default function PodcastsPage() {
                       {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
                     </button>
                   </div>
-                  {audioError && (
+                  {embedType === null && audioError && (
                     <div className="flex items-center gap-2 bg-amber/10 border border-amber/30 rounded-lg px-3 py-1.5">
                       <AlertCircle className="w-4 h-4 text-amber flex-shrink-0" />
                       <p className="text-[11px] text-amber font-medium">{audioError}</p>
