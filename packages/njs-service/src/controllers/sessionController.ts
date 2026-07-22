@@ -79,60 +79,86 @@ export async function getStudyLeaderboard(req: any, res: any) {
       userName: string;
       totalSpeakingSec: number;
       totalValidatedSec: number;
+      totalSessionXp: number;
       totalSessions: number;
       totalDurationSec: number;
     }>();
 
     for (const session of sessions) {
-      const hostEntry = userMap.get(session.hostId) ?? {
-        userId: session.hostId,
-        userName: session.hostName,
-        totalSpeakingSec: 0,
-        totalValidatedSec: 0,
-        totalSessions: 0,
-        totalDurationSec: 0,
-      };
-      hostEntry.totalSessions += 1;
-      hostEntry.totalDurationSec += session.totalDurationSec;
-      userMap.set(session.hostId, hostEntry);
+      const processedInSession = new Set<number>();
 
       try {
         const participants = JSON.parse(session.participantsJson);
         for (const p of participants) {
+          if (!p.oderId) continue;
+          processedInSession.add(p.oderId);
+
           const entry = userMap.get(p.oderId) ?? {
             userId: p.oderId,
-            userName: p.oderName,
+            userName: p.oderName || 'Learner',
             totalSpeakingSec: 0,
             totalValidatedSec: 0,
+            totalSessionXp: 0,
             totalSessions: 0,
             totalDurationSec: 0,
           };
+
           entry.totalSpeakingSec += p.activeSpeakingTimeSec ?? 0;
           entry.totalValidatedSec += p.validatedSpeakingTimeSec ?? 0;
+          entry.totalSessionXp += p.xpEarned ?? ((p.validatedSpeakingTimeSec ?? 0) * 2);
+          entry.totalSessions += 1;
+          entry.totalDurationSec += session.totalDurationSec ?? 0;
           userMap.set(p.oderId, entry);
         }
       } catch { /* ignore parse errors */ }
+
+      // Include host if host was not in participants array
+      if (session.hostId && !processedInSession.has(session.hostId)) {
+        const hostEntry = userMap.get(session.hostId) ?? {
+          userId: session.hostId,
+          userName: session.hostName || 'Host',
+          totalSpeakingSec: 0,
+          totalValidatedSec: 0,
+          totalSessionXp: 0,
+          totalSessions: 0,
+          totalDurationSec: 0,
+        };
+        hostEntry.totalSessions += 1;
+        hostEntry.totalDurationSec += session.totalDurationSec ?? 0;
+        userMap.set(session.hostId, hostEntry);
+      }
     }
 
     // Fetch authoritative XP from net-service for each unique user (in parallel)
     const userIds = Array.from(userMap.keys());
     const xpResults = await Promise.all(userIds.map(async (uid) => {
       const result = await fetchUserXpFromNetService(uid);
-      return { uid, xp: result.xp };
+      return { uid, xp: result.xp, failed: result.failed };
     }));
-    const xpMap = new Map(xpResults.map(r => [r.uid, r.xp]));
+    const xpMap = new Map(xpResults.map(r => [r.uid, r]));
 
     const ranking = Array.from(userMap.values())
-      .map(u => ({
-        userId: u.userId,
-        displayName: u.userName,
-        totalXp: xpMap.get(u.userId) ?? 0,
-        totalSpeakingSec: u.totalSpeakingSec,
-        totalValidatedSec: u.totalValidatedSec,
-        totalSessions: u.totalSessions,
-        totalDurationSec: u.totalDurationSec,
-      }))
-      .sort((a, b) => b.totalXp - a.totalXp)
+      .map(u => {
+        const netRes = xpMap.get(u.userId);
+        const totalXp = (netRes && !netRes.failed && netRes.xp > 0)
+          ? netRes.xp
+          : (u.totalSessionXp > 0 ? u.totalSessionXp : (netRes?.xp ?? 0));
+
+        return {
+          userId: u.userId,
+          displayName: u.userName,
+          totalXp,
+          totalSpeakingSec: u.totalSpeakingSec,
+          totalValidatedSec: u.totalValidatedSec,
+          totalSessions: u.totalSessions,
+          totalDurationSec: u.totalDurationSec,
+        };
+      })
+      .sort((a, b) => {
+        if (b.totalXp !== a.totalXp) return b.totalXp - a.totalXp;
+        if (b.totalSpeakingSec !== a.totalSpeakingSec) return b.totalSpeakingSec - a.totalSpeakingSec;
+        return b.totalSessions - a.totalSessions;
+      })
       .map((entry, idx) => ({ rank: idx + 1, ...entry }));
 
     return res.json(ranking);

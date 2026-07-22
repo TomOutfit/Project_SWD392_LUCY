@@ -19,6 +19,16 @@ interface StudyRankEntry {
   totalDurationSec: number;
 }
 
+function formatSpeakingTime(totalSec: number): string {
+  if (!totalSec || totalSec <= 0) return '0s speaking';
+  const hours = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (hours > 0) return `${hours}h ${mins}m speaking`;
+  if (mins > 0) return `${mins}m ${secs}s speaking`;
+  return `${secs}s speaking`;
+}
+
 async function fetchStudyLeaderboard(): Promise<StudyRankEntry[]> {
   const r = await sessionsApi.leaderboard();
   const data = r.data;
@@ -34,7 +44,11 @@ export default function LeaderboardPage() {
   const refreshStudyRanking = useCallback(async () => {
     try {
       const data = await fetchStudyLeaderboard();
-      setStudyEntries(data);
+      const mapped = data.map(entry => ({
+        ...entry,
+        displayName: entry.displayName || getAnonymousName(entry.userId, 'LUCY'),
+      }));
+      setStudyEntries(mapped);
     } catch {
       setStudyEntries([]);
     }
@@ -61,12 +75,11 @@ export default function LeaderboardPage() {
 
     fetchStudyLeaderboard()
       .then(data => {
-        // Transform to anonymous names for privacy
-        const anonymized = data.map(entry => ({
+        const mapped = data.map(entry => ({
           ...entry,
-          displayName: getAnonymousName(entry.userId, 'LUCY'),
+          displayName: entry.displayName || getAnonymousName(entry.userId, 'LUCY'),
         }));
-        setStudyEntries(anonymized);
+        setStudyEntries(mapped);
       })
       .catch(() => setStudyEntries([]))
       .finally(finish);
@@ -284,11 +297,14 @@ export default function LeaderboardPage() {
                           <Medal className="w-3.5 h-3.5 text-slate-400" /> #2
                         </div>
                         <div className="relative inline-block mb-3 mt-2">
-                          <Avatar personaId={1} name={studyEntries[1].displayName} size="xl" />
+                          <Avatar personaId={(studyEntries[1].userId % 6) + 1} name={studyEntries[1].displayName} size="xl" />
                         </div>
                         <p className="font-exo font-bold text-sm text-[#F0F4FF] line-clamp-1 mb-1">{studyEntries[1].displayName}</p>
                         <p className="font-mono font-bold text-lg mt-3 text-violet">{studyEntries[1].totalXp.toLocaleString()} XP</p>
-                        <p className="text-[10px] text-mist mt-1">{studyEntries[1].totalSessions} sessions</p>
+                        <p className="text-[10px] text-mist mt-1 flex items-center gap-1">
+                          <Mic className="w-3 h-3 text-mist/70 inline" />
+                          {formatSpeakingTime(studyEntries[1].totalSpeakingSec)}
+                        </p>
                       </div>
                     )}
                     {/* #1 champion */}
@@ -298,14 +314,17 @@ export default function LeaderboardPage() {
                           <Sparkles className="w-3.5 h-3.5 text-amber" style={{ animation: 'spin 2s linear infinite' }} /> Champion
                         </div>
                         <div className="relative inline-block mb-3 mt-1">
-                          <Avatar personaId={1} name={studyEntries[0].displayName} size="xl" />
+                          <Avatar personaId={(studyEntries[0].userId % 6) + 1} name={studyEntries[0].displayName} size="xl" />
                           <div className="absolute -top-3.5 -right-3.5 w-8 h-8 rounded-full bg-amber/15 border border-amber flex items-center justify-center shadow-lg">
                             <span className="text-base">*</span>
                           </div>
                         </div>
                         <p className="font-exo font-bold text-base text-[#F0F4FF] line-clamp-1 mb-1">{studyEntries[0].displayName}</p>
                         <p className="text-amber font-mono font-bold text-xl mt-3">{studyEntries[0].totalXp.toLocaleString()} XP</p>
-                        <p className="text-[10px] text-mist mt-1">{studyEntries[0].totalSessions} sessions</p>
+                        <p className="text-[10px] text-mist mt-1 flex items-center gap-1">
+                          <Mic className="w-3 h-3 text-mist/70 inline" />
+                          {formatSpeakingTime(studyEntries[0].totalSpeakingSec)}
+                        </p>
                       </div>
                     )}
                     {/* #3 */}
@@ -315,11 +334,14 @@ export default function LeaderboardPage() {
                           <Medal className="w-3.5 h-3.5 text-orange-500" /> #3
                         </div>
                         <div className="relative inline-block mb-3 mt-2">
-                          <Avatar personaId={1} name={studyEntries[2].displayName} size="xl" />
+                          <Avatar personaId={(studyEntries[2].userId % 6) + 1} name={studyEntries[2].displayName} size="xl" />
                         </div>
                         <p className="font-exo font-bold text-sm text-[#F0F4FF] line-clamp-1 mb-1">{studyEntries[2].displayName}</p>
                         <p className="font-mono font-bold text-lg mt-3 text-orange-500">{studyEntries[2].totalXp.toLocaleString()} XP</p>
-                        <p className="text-[10px] text-mist mt-1">{studyEntries[2].totalSessions} sessions</p>
+                        <p className="text-[10px] text-mist mt-1 flex items-center gap-1">
+                          <Mic className="w-3 h-3 text-mist/70 inline" />
+                          {formatSpeakingTime(studyEntries[2].totalSpeakingSec)}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -338,13 +360,13 @@ export default function LeaderboardPage() {
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-orbitron font-bold text-xs ${getRankBadgeClass(e.rank)}`}>
                           {e.rank}
                         </div>
-                        <Avatar personaId={1} name={e.displayName} size="sm" />
+                        <Avatar personaId={(e.userId % 6) + 1} name={e.displayName} size="sm" />
                         <div>
                           <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{e.displayName}</p>
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[9px] text-mist flex items-center gap-1">
-                              <Mic className="w-3 h-3" />
-                              {Math.floor(e.totalSpeakingSec / 3600)}h {Math.floor((e.totalSpeakingSec % 3600) / 60)}m speaking
+                              <Mic className="w-3 h-3 text-cyan" />
+                              {formatSpeakingTime(e.totalSpeakingSec)}
                             </span>
                           </div>
                         </div>
@@ -352,7 +374,7 @@ export default function LeaderboardPage() {
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1 text-cyan text-[10px] font-mono">
                           <BookOpen className="w-3 h-3" />
-                          {e.totalSessions}sessions
+                          {e.totalSessions} sessions
                         </div>
                         <div className="flex items-center gap-1 text-violet">
                           <TrendingUp className="w-4 h-4" />
