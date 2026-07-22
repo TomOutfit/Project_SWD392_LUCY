@@ -860,7 +860,8 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     set({ isUploading: true, currentPodcastId: podcastId });
     try {
-      const mimeType = chunks[0]?.type || 'audio/webm';
+      const rawMime = chunks[0]?.type || 'audio/webm';
+      const mimeType = rawMime.split(';')[0].trim() || 'audio/webm';
       const blob = new Blob(chunks, { type: mimeType });
       const formData = new FormData();
       formData.append('audio', blob, `${podcastId}.webm`);

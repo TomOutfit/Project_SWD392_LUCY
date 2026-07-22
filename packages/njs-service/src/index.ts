@@ -190,13 +190,19 @@ const storage = multer.diskStorage({
   }
 });
 
+const isAudioMime = (mimetype: string) => {
+  if (!mimetype) return true;
+  const baseMime = mimetype.split(';')[0].trim().toLowerCase();
+  const allowed = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/x-m4a', 'audio/aac', 'audio/wav', 'video/webm', 'application/octet-stream'];
+  return baseMime.startsWith('audio/') || allowed.includes(baseMime);
+};
+
 // Only allow audio formats. Reject oversized or non-audio files.
 const upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB cap
-  fileFilter: (req, file, cb) => {
-    const allowed = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/x-m4a', 'audio/aac'];
-    if (allowed.includes(file.mimetype)) {
+  fileFilter: (_req, file, cb) => {
+    if (isAudioMime(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error(`Unsupported file type: ${file.mimetype}. Only audio files are allowed.`));
@@ -209,8 +215,7 @@ app.post('/api/podcasts/:id/upload', (req: Request, res: Response) => {
     storage,
     limits: { fileSize: 100 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-      const allowed = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/x-m4a', 'audio/aac'];
-      if (allowed.includes(file.mimetype)) {
+      if (isAudioMime(file.mimetype)) {
         cb(null, true);
       } else {
         cb(new Error(`Unsupported file type: ${file.mimetype}. Only audio files are allowed.`));
