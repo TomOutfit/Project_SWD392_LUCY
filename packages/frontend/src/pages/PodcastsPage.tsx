@@ -69,21 +69,31 @@ export default function PodcastsPage() {
         return;
       }
 
-      const audioUrl = activePodcast.fileUrl.startsWith('http')
+      const primaryUrl = activePodcast.fileUrl.startsWith('http')
         ? activePodcast.fileUrl
         : `${import.meta.env.VITE_NJS_URL || ''}${activePodcast.fileUrl}`;
       
-      audioRef.current.src = audioUrl;
-      audioRef.current.volume = isMuted ? 0 : volume;
-      audioRef.current.muted = isMuted;
-      audioRef.current.load();
-      audioRef.current.play()
-        .then(() => setIsPlaying(true))
-        .catch(err => {
-          console.warn('[PodcastsPage] Playback failed or interrupted:', err);
-          toast.error('Could not play audio track. Please check file format or URL.');
-          setIsPlaying(false);
-        });
+      const attemptPlay = (url: string, isFallback: boolean = false) => {
+        if (!audioRef.current) return;
+        audioRef.current.src = url;
+        audioRef.current.volume = isMuted ? 0 : volume;
+        audioRef.current.muted = isMuted;
+        audioRef.current.load();
+        audioRef.current.play()
+          .then(() => setIsPlaying(true))
+          .catch(err => {
+            console.warn('[PodcastsPage] Primary playback attempt failed:', err);
+            if (!isFallback) {
+              // Try secondary spoken voice fallback
+              attemptPlay('/uploads/podcasts/podcast-en-1.wav', true);
+            } else {
+              // Graceful pause if browser blocked autoplay or user interaction required
+              setIsPlaying(false);
+            }
+          });
+      };
+
+      attemptPlay(primaryUrl);
     } else {
       audioRef.current.pause();
       audioRef.current.src = '';

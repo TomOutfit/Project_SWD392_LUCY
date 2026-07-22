@@ -55,7 +55,9 @@ app.use((req, res, next) => {
 // Serve uploads directory with Range request support for audio streaming
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
   setHeaders: (res, filePath) => {
-    // Enable Range requests for all files
+    // Enable CORS and Range requests for static audio resources
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Accept-Ranges', 'bytes');
     
     // Set proper MIME types for audio files
@@ -67,6 +69,8 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
       res.setHeader('Content-Type', 'audio/mp4');
     } else if (filePath.endsWith('.mp3')) {
       res.setHeader('Content-Type', 'audio/mpeg');
+    } else if (filePath.endsWith('.wav') || filePath.endsWith('.wave')) {
+      res.setHeader('Content-Type', 'audio/wav');
     }
   }
 }));
