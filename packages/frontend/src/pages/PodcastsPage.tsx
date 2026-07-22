@@ -405,7 +405,7 @@ export default function PodcastsPage() {
               </div>
               <div>
                 <h1 className="font-orbitron font-black text-3xl text-[#F0F4FF] tracking-wider flex items-center gap-2">
-                  Spotify Podcast Hub
+                  Language Podcast Hub
                   <span className="text-xs font-mono font-normal text-cyan bg-cyan/10 border border-cyan/30 px-2 py-0.5 rounded-full">
                     {podcasts.length} Shows
                   </span>
