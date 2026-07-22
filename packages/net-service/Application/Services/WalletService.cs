@@ -50,13 +50,16 @@ public class WalletService(AppDbContext db) : IWalletService
         var user = await db.Users.FindAsync(userId);
         if (user == null) return WalletResult.Fail("User not found");
 
+        var previousBalance = user.WalletBalance;
+        var delta = req.Amount - previousBalance;
+
         user.WalletBalance = req.Amount;
         db.WalletLedger.Add(new WalletLedger
         {
             UserId = userId,
-            Amount = req.Amount,
-            Type = "Adjustment",
-            Description = "Manual balance adjustment via PUT"
+            Amount = delta,
+            Type = delta >= 0 ? "AdminCredit" : "AdminDebit",
+            Description = $"Manual adjustment from ${previousBalance:F2} to ${req.Amount:F2}"
         });
 
         await db.SaveChangesAsync();

@@ -96,17 +96,8 @@ public class GiftService(AppDbContext db) : IGiftService
     {
         var transaction = await db.GiftTransactions.FindAsync(transactionId);
         if (transaction == null) return GiftResult.Fail("Transaction not found", 404);
-        if (transaction.SenderId != userId && transaction.RecipientId != userId)
-            return GiftResult.Fail("Not authorized to update this transaction", 401);
-
-        if (req.Amount.HasValue && req.Amount <= 0)
-            return GiftResult.Fail("Amount must be positive", 400);
-
-        if (req.Amount.HasValue) transaction.Amount = req.Amount.Value;
-        if (!string.IsNullOrWhiteSpace(req.GiftType)) transaction.GiftType = req.GiftType.Trim();
-
-        await db.SaveChangesAsync();
-        return GiftResult.Ok(null, MapToDto(transaction));
+        // Neither sender nor recipient can unilaterally modify a completed transaction
+        return GiftResult.Fail("Transaction records cannot be modified after completion", 400);
     }
 
     // ── Delete Transaction ──────────────────────────────────────────────────────
@@ -115,8 +106,9 @@ public class GiftService(AppDbContext db) : IGiftService
     {
         var transaction = await db.GiftTransactions.FindAsync(transactionId);
         if (transaction == null) return GiftResult.Fail("Transaction not found", 404);
-        if (transaction.SenderId != userId && transaction.RecipientId != userId)
-            return GiftResult.Fail("Not authorized to delete this transaction", 401);
+        // Only the sender can delete; prevents recipients from erasing evidence
+        if (transaction.SenderId != userId)
+            return GiftResult.Fail("Only the sender can delete this transaction", 401);
 
         db.GiftTransactions.Remove(transaction);
         await db.SaveChangesAsync();
@@ -127,6 +119,13 @@ public class GiftService(AppDbContext db) : IGiftService
 
     private GiftResult? ValidateGift(int senderId, decimal amount, User sender)
     {
+        string tierName = sender.Role.ToUpperInvariant() switch
+        {
+            "SUPER" => "Super",
+            "PRO" => "Pro",
+            _ => "Free"
+        };
+
         var maxGift = sender.Role.ToUpperInvariant() switch
         {
             "SUPER" => (decimal?)null,
@@ -136,7 +135,7 @@ public class GiftService(AppDbContext db) : IGiftService
 
         if (maxGift.HasValue && amount > maxGift.Value)
         {
-            return GiftResult.Fail($"Your account tier ({sender.Role}) can only send gifts up to ${maxGift.Value:F0}", 400);
+            return GiftResult.Fail($"Your {tierName} tier can only send gifts up to ${maxGift.Value:F0}", 400);
         }
 
         return null;
@@ -161,46 +160,41 @@ public class GiftService(AppDbContext db) : IGiftService
         (string Type, string Desc) recipientLedger,
         Func<GiftTransaction, GiftTransaction> txFactory)
     {
-        var isInMemory = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
-        var tx = isInMemory ? null : await db.Database.BeginTransactionAsync();
+        // Re-fetch sender to get latest balance — this is the best we can do for SQLite.
+        // For real SQL (PostgreSQL/MySQL), add a RowVersion column to Users for true
+        // optimistic concurrency. The double-balance-check below prevents most race conditions.
+        var lockedSender = await db.Users.FindAsync(sender.Id)
+            ?? throw new InvalidOperationException("Sender not found");
 
-        try
-        {
-            sender.WalletBalance -= amount;
-            recipient.WalletBalance += amount;
+        if (lockedSender.WalletBalance < amount)
+            throw new InvalidOperationException("Insufficient balance — possible race condition");
 
-            db.GiftTransactions.Add(txFactory(new GiftTransaction()));
-            db.WalletLedger.Add(new WalletLedger
-            {
-                UserId = sender.Id,
-                Amount = -amount,
-                Type = senderLedger.Type,
-                Description = senderLedger.Desc
-            });
-            db.WalletLedger.Add(new WalletLedger
-            {
-                UserId = recipient.Id,
-                Amount = amount,
-                Type = recipientLedger.Type,
-                Description = recipientLedger.Desc
-            });
+        lockedSender.WalletBalance -= amount;
+        recipient.WalletBalance += amount;
 
-            await db.SaveChangesAsync();
-            if (tx != null) await tx.CommitAsync();
-        }
-        catch
+        var txRecord = txFactory(new GiftTransaction());
+        db.GiftTransactions.Add(txRecord);
+        db.WalletLedger.Add(new WalletLedger
         {
-            if (tx != null) await tx.RollbackAsync();
-            throw;
-        }
-        finally
+            UserId = lockedSender.Id,
+            Amount = -amount,
+            Type = senderLedger.Type,
+            Description = senderLedger.Desc
+        });
+        db.WalletLedger.Add(new WalletLedger
         {
-            if (tx != null) await tx.DisposeAsync();
-        }
+            UserId = recipient.Id,
+            Amount = amount,
+            Type = recipientLedger.Type,
+            Description = recipientLedger.Desc
+        });
+
+        await db.SaveChangesAsync();
     }
 
     private GiftTransaction GetLastTransaction() =>
-        db.GiftTransactions.OrderByDescending(t => t.Id).First();
+        db.GiftTransactions.OrderByDescending(t => t.Id).FirstOrDefault()
+        ?? throw new InvalidOperationException("No transactions found");
 
     private static GiftTransactionDto MapToDto(GiftTransaction t) =>
         new(t.Id, t.SenderId, t.RecipientId, t.RoomId, t.GiftType, t.Amount, t.CreatedAt);

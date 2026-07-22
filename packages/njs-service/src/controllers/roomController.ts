@@ -44,11 +44,11 @@ export async function getAgoraToken(req: Request, res: Response) {
     const uid = parseInt((req.query.uid as string | undefined) || '0', 10) || 0;
     const expireSec = parseInt((req.query.expireSec as string | undefined) || '3600', 10) || 3600;
 
-    const appId = process.env.AGORA_APP_ID || 'c309f46a6f23498a8f8bec6dd3f17fb8';
-    const appCredential = process.env.AGORA_APP_CREDENTIAL || '6907e1d99eec490481997120e3d80639';
+    const appId = process.env.AGORA_APP_ID;
+    const appCredential = process.env.AGORA_APP_CREDENTIAL;
 
     if (!appId || !appCredential) {
-      return res.status(500).json({ error: 'Agora App ID / App Credential not configured on server' });
+      return res.status(500).json({ error: 'Agora credentials not configured' });
     }
 
     console.log('[AgoraToken] Generating token with App ID:', appId, 'channel:', channelName, 'uid:', uid);

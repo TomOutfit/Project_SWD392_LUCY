@@ -201,6 +201,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   connectSocket(userId, userName, userPersonaId, userRole, _roomId?) {
     set({ myUserId: userId });
     const existing = get().socket;
+    if (existing) {
+      existing.disconnect();
+    }
     if (existing?.connected) return;
 
     // In production (Docker): VITE_NJS_URL is unset → connect to same origin

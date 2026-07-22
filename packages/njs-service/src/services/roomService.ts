@@ -3,6 +3,8 @@ import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
+import http from 'http';
 import { Language, RoomState, Participant, ContentPin, Room } from '../types/index.js';
 import { RoomStageSubject, SocketNotifierObserver, DbPersistenceObserver, MaterialRecommenderObserver } from './observer.js';
 import db from '../db/index.js';
@@ -17,11 +19,102 @@ const NET_SERVICE_URL =
   process.env.NET_SERVICE_BASE_URL || // Render sets this internally
   'http://localhost:5001';
 
-interface XpRecordPayload {
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
+const isProduction = process.env.NODE_ENV === 'production';
+
+// ── Persistent XP retry queue (survives process restarts) ───────────────────
+
+interface XpRecord {
   userId: number;
   amount: number;
   roomId: string;
   description: string;
+  queuedAt: string;
+}
+
+interface XpQueuePayload {
+  records: XpRecord[];
+}
+
+const XP_QUEUE_FILE = path.join(process.cwd(), 'data', 'xp_retry_queue.json');
+
+function loadXpQueue(): XpRecord[] {
+  try {
+    if (fs.existsSync(XP_QUEUE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(XP_QUEUE_FILE, 'utf-8')) as XpQueuePayload;
+      return data.records ?? [];
+    }
+  } catch { /* corrupt file — start fresh */ }
+  return [];
+}
+
+function saveXpQueue(records: XpRecord[]): void {
+  try {
+    const dir = path.dirname(XP_QUEUE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(XP_QUEUE_FILE, JSON.stringify({ records }, null, 2));
+  } catch (err) {
+    console.error('[roomService] Failed to persist XP queue to disk:', err);
+  }
+}
+
+let xpQueue: XpRecord[] = loadXpQueue();
+let xpQueueProcessing = false;
+
+async function processXpQueue(): Promise<void> {
+  if (xpQueueProcessing || xpQueue.length === 0) return;
+  xpQueueProcessing = true;
+
+  while (xpQueue.length > 0) {
+    const record = xpQueue[0];
+    const success = await recordXpOnce(record);
+    if (success) {
+      xpQueue.shift();
+      saveXpQueue(xpQueue);
+    } else {
+      break; // Will retry on next room close
+    }
+  }
+
+  xpQueueProcessing = false;
+}
+
+function queueXpRecord(record: XpRecord): void {
+  xpQueue.push(record);
+  saveXpQueue(xpQueue);
+}
+
+// ── Core XP recording ──────────────────────────────────────────────────────
+
+function isHttpsUrl(url: string): boolean {
+  return url.toLowerCase().startsWith('https://');
+}
+
+async function recordXpOnce(record: XpRecord): Promise<boolean> {
+  const url = `${NET_SERVICE_URL}/api/xp/record-internal`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Api-Key': INTERNAL_API_KEY,
+      },
+      body: JSON.stringify(record),
+    });
+
+    if (res.ok) {
+      const json = await res.json().catch(() => ({}));
+      console.log(`[roomService] XP recorded for user ${record.userId}: +${record.amount} (total: ${json.xp ?? '?'})`);
+      return true;
+    }
+
+    const errBody = await res.text();
+    console.error(`[roomService] XP record failed for user ${record.userId} — HTTP ${res.status}: ${errBody}`);
+    return false;
+  } catch (err) {
+    console.error(`[roomService] XP record failed for user ${record.userId}:`, err instanceof Error ? err.message : err);
+    return false;
+  }
 }
 
 async function recordXpToNetService(
@@ -31,52 +124,44 @@ async function recordXpToNetService(
 ): Promise<void> {
   if (xpEarned <= 0) return;
 
-  const payload: XpRecordPayload = {
+  // Warn if NET_SERVICE_URL is HTTP in production
+  if (isProduction && !isHttpsUrl(NET_SERVICE_URL)) {
+    console.warn(`[roomService] ⚠ NET_SERVICE_URL uses HTTP in production — credentials will be transmitted in plaintext. Set to an HTTPS URL.`);
+  }
+
+  const record: XpRecord = {
     userId,
     amount: xpEarned,
     roomId,
     description: `Study session: ${roomId}`,
+    queuedAt: new Date().toISOString(),
   };
 
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const res = await fetch(`${NET_SERVICE_URL}/api/xp/record`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const json = await res.json().catch(() => ({}));
-        console.log(
-          `[roomService] XP recorded for user ${userId}: +${xpEarned} (total: ${json.xp ?? '?'})`,
-        );
-        return;
-      }
-
-      const errBody = await res.text();
-      console.error(
-        `[roomService] XP record failed for user ${userId} (attempt ${attempt}/${maxAttempts}) — HTTP ${res.status}: ${errBody}`,
-      );
-    } catch (err) {
-      console.error(
-        `[roomService] XP record failed for user ${userId} (attempt ${attempt}/${maxAttempts}):`,
-        err instanceof Error ? err.message : err,
-      );
-    }
+    const success = await recordXpOnce(record);
+    if (success) return;
 
     if (attempt < maxAttempts) {
-      const delayMs = attempt * 1000; // 1s, 2s back-off
+      const delayMs = attempt * 1000;
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
 
-  // All retries exhausted — log for manual reconciliation
+  // All retries exhausted — persist to disk for manual/background reconciliation
+  queueXpRecord(record);
   console.error(
     `[roomService] ⚠ All ${maxAttempts} XP record attempts failed for user ${userId}. ` +
-    `Payload: ${JSON.stringify(payload)}. Manual compensation required.`,
+    `Queued for retry. Payload: ${JSON.stringify(record)}`,
   );
+
+  // Emit a custom metric event so external monitoring can pick it up
+  if (typeof process.emitWarning === 'function') {
+    process.emitWarning(
+      `XP_RECORD_FAILED: userId=${userId} amount=${xpEarned} roomId=${roomId}`,
+      'XpRecordError',
+    );
+  }
 }
 
 // ── Latency helpers ───────────────────────────────────────────────────────────
@@ -391,6 +476,9 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       recordXpToNetService(p.oderId, p.xpEarned, roomId);
     }
 
+    // Process any previously queued XP records (from failed earlier room closes)
+    processXpQueue();
+
     // Persist study session to DB (survives room closure)
     try {
       await db.insert(studySessions).values({
@@ -700,9 +788,9 @@ export function getActiveRooms(): Room[] {
 let ioInstance: Server;
 export function setIO(io: Server) { ioInstance = io; }
 
-// ── Legacy speaking duration tracker (legacy wall-clock seconds while unmuted) ─
-
-setInterval(() => {
+// ── Legacy speaking duration tracker ─────────────────────────────────────────
+// Cleans up on SIGTERM/SIGINT so the timer doesn't leak on Docker shutdown.
+const speakingTracker = setInterval(() => {
   for (const [, roomData] of activeRooms.entries()) {
     let updated = false;
     for (const p of roomData.room.participants) {
@@ -716,6 +804,16 @@ setInterval(() => {
     }
   }
 }, 1000);
+
+// Attempt graceful cleanup on Docker/unix shutdown signals
+process.on('SIGTERM', () => {
+  clearInterval(speakingTracker);
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  clearInterval(speakingTracker);
+  process.exit(0);
+});
 
 // ── AI Recommendations ───────────────────────────────────────────────────────
 

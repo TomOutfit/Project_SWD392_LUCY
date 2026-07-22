@@ -38,9 +38,11 @@ public class WalletController(IWalletService walletService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateBalance([FromBody] UpdateBalanceRequest req)
     {
+        if (!IsAdmin()) return Forbid();
         var result = await walletService.UpdateBalanceAsync(GetUserId(), req);
         return MapResult(result);
     }
@@ -48,14 +50,19 @@ public class WalletController(IWalletService walletService) : ControllerBase
     [HttpDelete]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ClearHistory()
     {
+        if (!IsAdmin()) return Forbid();
         var result = await walletService.ClearHistoryAsync(GetUserId());
         return MapResult(result);
     }
 
     private int GetUserId() => int.Parse(User.FindFirstValue("userId")!);
+
+    private bool IsAdmin() =>
+        string.Equals(User.FindFirstValue("role"), "ADMIN", StringComparison.OrdinalIgnoreCase);
 
     private IActionResult MapResult(WalletResult result)
     {

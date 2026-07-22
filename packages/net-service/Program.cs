@@ -53,6 +53,9 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var jwtKey = builder.Configuration["Jwt:Key"]!;
+if (string.IsNullOrEmpty(jwtKey))
+    throw new InvalidOperationException(
+        "JWT key is not configured. Set the Jwt:Key environment variable to a secure 32+ character string.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opt =>
     {
@@ -68,10 +71,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+var allowedOrigins = (Environment.GetEnvironmentVariable("ALLOWED_ORIGINS") ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Where(o => Uri.TryCreate(o, UriKind.Absolute, out _))
+    .ToList();
+
+if (allowedOrigins.Count == 0 && !builder.Environment.IsDevelopment())
+    Console.WriteLine("WARNING: ALLOWED_ORIGINS is not set. CORS will block cross-origin requests in production.");
+
 builder.Services.AddCors(opt =>
     opt.AddDefaultPolicy(policy =>
         policy
-            .SetIsOriginAllowed(_ => true)   // Echo any Origin back (needed for credentials)
+            .WithOrigins(allowedOrigins.ToArray())
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials()

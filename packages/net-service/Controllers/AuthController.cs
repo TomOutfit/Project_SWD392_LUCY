@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace LucyNetService.Controllers;
@@ -87,21 +88,31 @@ public class AuthController(AppDbContext db, IConfiguration config) : Controller
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    private static int NewSecureRandomId() {
+        var bytes = new byte[4];
+        RandomNumberGenerator.Fill(bytes);
+        return Math.Abs(BitConverter.ToInt32(bytes, 0)) % 90000 + 10000; // 10000–99999
+    }
+
     [HttpPost("guest")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GuestLogin([FromBody] GuestLoginRequest req)
     {
-        var randomId = new Random().Next(10000, 99999);
-        var displayName = string.IsNullOrWhiteSpace(req.DisplayName) 
-            ? $"Guest_{randomId}" 
+        var randomId = NewSecureRandomId();
+        var displayName = string.IsNullOrWhiteSpace(req.DisplayName)
+            ? $"Guest_{randomId}"
             : req.DisplayName.Trim();
+
+        var personaBytes = new byte[4];
+        RandomNumberGenerator.Fill(personaBytes);
+        var personaId = (Math.Abs(BitConverter.ToInt32(personaBytes, 0)) % 5) + 1;
 
         var user = new User
         {
             Email = $"guest_{randomId}@lucy.com",
             PasswordHash = BCrypt.Net.BCrypt.HashPassword("GuestPassword123!"),
             DisplayName = displayName,
-            PersonaId = new Random().Next(1, 6),
+            PersonaId = personaId,
             Role = "LUCY",
             WalletBalance = 0m
         };
