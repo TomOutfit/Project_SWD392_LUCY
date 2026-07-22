@@ -26,7 +26,9 @@ export default function PodcastsPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const youtubeIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [showSpotifyPlayer, setShowSpotifyPlayer] = useState(false);
+  const [embedType, setEmbedType] = useState<'youtube' | 'spotify' | null>(null);
 
   // Title editing state
   const [editingPodcastId, setEditingPodcastId] = useState<string | null>(null);
@@ -65,7 +67,13 @@ export default function PodcastsPage() {
     if (podcast.fileUrl) {
       if (podcast.fileUrl.includes('youtube.com') || podcast.fileUrl.includes('youtu.be')) {
         const videoId = extractYouTubeId(podcast.fileUrl);
-        if (videoId) return { url: `https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0`, type: 'youtube' };
+        if (videoId) {
+          // Build clean embed URL with enablejsapi=1 for postMessage API control
+          return {
+            url: `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0`,
+            type: 'youtube'
+          };
+        }
       }
       if (podcast.fileUrl.includes('open.spotify.com')) {
         return { url: podcast.fileUrl, type: 'spotify' };
@@ -97,12 +105,13 @@ export default function PodcastsPage() {
     if (!audioRef.current) return;
 
     if (activePodcast) {
-      const { url: embedUrl } = getEmbedUrl(activePodcast);
+      const { url: embedUrl, type } = getEmbedUrl(activePodcast);
+      setEmbedType(type);
       // Embedded player (YouTube or Spotify) handles playback — skip native audio
       if (embedUrl) {
         setShowSpotifyPlayer(true);
-        audioRef.current.pause();
-        audioRef.current.src = '';
+        audioRef.current?.pause();
+        audioRef.current!.src = '';
         setIsPlaying(false);
         setAudioError(null);
         return;
@@ -149,7 +158,30 @@ export default function PodcastsPage() {
   }, [activePodcast]);
 
   const togglePlayPause = () => {
-    if (!audioRef.current || !activePodcast) return;
+    if (!activePodcast) return;
+
+    // Embedded player: send play/pause via postMessage
+    if (embedType === 'youtube' && youtubeIframeRef.current) {
+      // YouTube iframe: toggle play state visually
+      setIsPlaying(prev => {
+        const newState = !prev;
+        youtubeIframeRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ event: 'command', func: newState ? 'playVideo' : 'pauseVideo' }),
+          'https://www.youtube.com'
+        );
+        return newState;
+      });
+      return;
+    }
+
+    if (embedType === 'spotify') {
+      // Spotify iframe: just toggle visual state (Spotify handles its own playback)
+      setIsPlaying(prev => !prev);
+      return;
+    }
+
+    // Native audio fallback
+    if (!audioRef.current) return;
     if (!activePodcast.fileUrl) {
       toast.error('No audio recording available for this podcast');
       return;
@@ -159,7 +191,6 @@ export default function PodcastsPage() {
       setIsPlaying(false);
     } else {
       if (audioError) {
-        // Retry loading from primary URL
         const primaryUrl = activePodcast.fileUrl.startsWith('http')
           ? activePodcast.fileUrl
           : `${import.meta.env.VITE_NJS_URL || ''}${activePodcast.fileUrl}`;
@@ -193,6 +224,7 @@ export default function PodcastsPage() {
     setCurrentTime(0);
     setAudioError(null);
     setShowSpotifyPlayer(false);
+    setEmbedType(getEmbedUrl(podcast).type);
     setDuration(podcast.durationSec || 0);
 
     // Call API to register list count increment
@@ -643,17 +675,24 @@ export default function PodcastsPage() {
             {getEmbedUrl(activePodcast).type === 'youtube' && (
               <iframe
                 key={activePodcast.id}
+                ref={youtubeIframeRef}
                 src={getEmbedUrl(activePodcast).url!}
                 width="100%"
                 height="250"
-                srcDoc=""
                 frameBorder="0"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
                 loading="lazy"
                 className="block"
                 title={`YouTube: ${activePodcast.title}`}
-                onLoad={() => setShowSpotifyPlayer(true)}
+                onLoad={() => {
+                  setShowSpotifyPlayer(true);
+                  // Auto-play on first load via postMessage
+                  youtubeIframeRef.current?.contentWindow?.postMessage(
+                    JSON.stringify({ event: 'command', func: 'playVideo' }),
+                    'https://www.youtube.com'
+                  );
+                }}
               />
             )}
 
