@@ -52,8 +52,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve uploads directory
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// Serve uploads directory with Range request support for audio streaming
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  setHeaders: (res, filePath) => {
+    // Enable Range requests for all files
+    res.setHeader('Accept-Ranges', 'bytes');
+    
+    // Set proper MIME types for audio files
+    if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'audio/webm');
+    } else if (filePath.endsWith('.ogg')) {
+      res.setHeader('Content-Type', 'audio/ogg');
+    } else if (filePath.endsWith('.mp4') || filePath.endsWith('.m4a')) {
+      res.setHeader('Content-Type', 'audio/mp4');
+    } else if (filePath.endsWith('.mp3')) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    }
+  }
+}));
 
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', service: 'LUCY Node.js Service', timestamp: new Date().toISOString() }));
