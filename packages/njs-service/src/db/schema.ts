@@ -1,10 +1,9 @@
-// src/db/schema.ts
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
 export const levels = sqliteTable('levels', {
   id: integer('id').primaryKey(),
   name: text('name').notNull(),
-  language: text('language').notNull(), // EN, ZH, JA
+  language: text('language').notNull(), // EN, ZH, JA, ES, FR, DE, KO
   stage: integer('stage').notNull(),   // 1, 2, 3
   subLevel: integer('sub_level').notNull(), // 1-12
   contentJson: text('content_json').notNull(),
@@ -34,13 +33,15 @@ export const podcasts = sqliteTable('podcasts', {
   creatorId: integer('creator_id').notNull(),
   creatorName: text('creator_name').notNull(),
   title: text('title').notNull(),
+  description: text('description'),
   durationSec: integer('duration_sec').notNull(),
-  fileUrl: text('file_url').notNull(),
+  fileUrl: text('file_url').notNull(), // Spotify embed URL or self-hosted audio
   coverUrl: text('cover_url'),
   language: text('language').notNull(),
   levelName: text('level_name').notNull(),
   createdAt: text('created_at').notNull(),
   listenCount: integer('listen_count').notNull().default(0),
+  spotifyUrl: text('spotify_url'), // Full Spotify embed URL for iframe player
 });
 
 export const studySessions = sqliteTable('study_sessions', {
@@ -50,7 +51,7 @@ export const studySessions = sqliteTable('study_sessions', {
   hostName: text('host_name').notNull(),
   language: text('language').notNull(),
   levelName: text('level_name').notNull(),
-  participantsJson: text('participants_json').notNull(), // JSON: [{userId, userName, oderRole, activeSpeakingTimeSec, xpEarned}]
+  participantsJson: text('participants_json').notNull(),
   totalDurationSec: integer('total_duration_sec').notNull(),
   createdAt: text('created_at').notNull(),
   closedAt: text('closed_at').notNull(),

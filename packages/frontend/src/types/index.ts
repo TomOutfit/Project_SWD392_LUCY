@@ -81,9 +81,11 @@ export interface Podcast {
   creatorId: number;
   creatorName: string;
   title: string;
+  description?: string;
   durationSec: number;
   fileUrl: string;
   coverUrl?: string;
+  spotifyUrl?: string;
   language: Language;
   levelName: string;
   createdAt: string;

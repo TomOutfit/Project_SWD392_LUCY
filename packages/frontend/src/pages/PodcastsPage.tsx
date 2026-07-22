@@ -1,4 +1,4 @@
-// src/pages/PodcastsPage.tsx
+﻿// src/pages/PodcastsPage.tsx
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle, Heart, Search, Music, Headphones, Disc, ShieldCheck, Unlock } from 'lucide-react';
@@ -26,6 +26,8 @@ export default function PodcastsPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const spotifyIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [showSpotifyPlayer, setShowSpotifyPlayer] = useState(false);
 
   // Title editing state
   const [editingPodcastId, setEditingPodcastId] = useState<string | null>(null);
@@ -64,6 +66,17 @@ export default function PodcastsPage() {
     if (!audioRef.current) return;
 
     if (activePodcast) {
+      // Spotify handles playback via iframe — skip native audio
+      if (activePodcast.spotifyUrl) {
+        setShowSpotifyPlayer(true);
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        setIsPlaying(false);
+        setAudioError(null);
+        return;
+      }
+
+      // No Spotify: use native audio
       if (!activePodcast.fileUrl) {
         toast.error('No audio recording available for this podcast');
         setIsPlaying(false);
@@ -73,8 +86,8 @@ export default function PodcastsPage() {
       const primaryUrl = activePodcast.fileUrl.startsWith('http')
         ? activePodcast.fileUrl
         : `${import.meta.env.VITE_NJS_URL || ''}${activePodcast.fileUrl}`;
-      
-      const attemptPlay = (url: string, isFallback: boolean = false) => {
+
+      const attemptPlay = (url: string, isFallback = false) => {
         if (!audioRef.current) return;
         setAudioError(null);
         audioRef.current.src = url;
@@ -85,12 +98,9 @@ export default function PodcastsPage() {
           .then(() => setIsPlaying(true))
           .catch(err => {
             console.warn('[PodcastsPage] Playback error:', err);
-            // If primary URL fails, check if this is the primary and has a meaningful fileUrl
             if (!isFallback && activePodcast?.fileUrl) {
-              // Primary URL (NJS-hosted) failed — try the original fileUrl directly
               attemptPlay(activePodcast.fileUrl, true);
             } else {
-              // Fallback also failed or no fileUrl available — show error
               setAudioError('Audio unavailable. The recording may not have been saved yet.');
               setIsPlaying(false);
             }
@@ -102,6 +112,7 @@ export default function PodcastsPage() {
       audioRef.current.pause();
       audioRef.current.src = '';
       setIsPlaying(false);
+      setShowSpotifyPlayer(false);
     }
   }, [activePodcast]);
 
@@ -134,7 +145,8 @@ export default function PodcastsPage() {
   };
 
   const handlePlayPodcast = async (podcast: Podcast) => {
-    if (!podcast.fileUrl) {
+    // Spotify URLs load via iframe — no native audio check needed
+    if (!podcast.spotifyUrl && !podcast.fileUrl) {
       toast.error('No audio recording available for this podcast');
       return;
     }
@@ -148,6 +160,7 @@ export default function PodcastsPage() {
     setIsPlaying(false);
     setCurrentTime(0);
     setAudioError(null);
+    setShowSpotifyPlayer(false);
     setDuration(podcast.durationSec || 0);
 
     // Call API to register list count increment
@@ -583,7 +596,8 @@ export default function PodcastsPage() {
         )}
       </motion.div>
 
-      {/* Spotify Floating Audio Player Bar */}
+      {/* ── Podcast Player ────────────────────────────────────────────── */}
+      {/* Spotify iframe takes priority for rich playback; falls back to native audio */}
       <AnimatePresence>
         {activePodcast && (
           <motion.div
@@ -591,94 +605,114 @@ export default function PodcastsPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
             transition={{ type: 'spring', damping: 20 }}
-            className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:w-[720px] md:-translate-x-1/2 z-50 rounded-2xl glass border border-cyan/40 bg-[#0A0B1B]/95 shadow-[0_10px_35px_rgba(0,245,255,0.2)] p-3.5 flex flex-col md:flex-row items-center gap-4"
+            className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:w-[820px] md:-translate-x-1/2 z-50 rounded-2xl glass border border-cyan/40 bg-[#0A0B1B]/95 shadow-[0_10px_35px_rgba(0,245,255,0.2)] overflow-hidden"
           >
-            {/* Cover Art Thumbnail & Info */}
-            <div className="flex items-center gap-3 w-full md:w-auto md:min-w-[200px] md:max-w-[240px]">
-              <div className="w-12 h-12 rounded-xl overflow-hidden relative flex-shrink-0 bg-navy/60 border border-cyan/30 shadow-md">
-                {activePodcast.coverUrl ? (
-                  <img src={activePodcast.coverUrl} alt="" className={`w-full h-full object-cover ${isPlaying ? 'scale-105' : ''} transition-transform`} />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-cyan/30 to-violet/30">
-                    <Disc className={`w-6 h-6 text-cyan ${isPlaying ? 'animate-spin' : ''}`} />
-                  </div>
-                )}
-                {isPlaying && (
-                  <div className="absolute inset-0 bg-void/30 flex items-center justify-center">
-                    <Radio className="w-5 h-5 text-cyan animate-pulse" />
-                  </div>
-                )}
-              </div>
-              <div className="overflow-hidden">
-                <h4 className="text-xs font-exo font-bold text-[#F0F4FF] truncate leading-tight">{activePodcast.title}</h4>
-                <p className="text-[10px] text-mist truncate mt-0.5">By {activePodcast.creatorName}</p>
-              </div>
-            </div>
+            {/* ── Spotify iframe player (full-width when available) ── */}
+            {activePodcast.spotifyUrl ? (
+              <iframe
+                key={activePodcast.id}
+                ref={spotifyIframeRef}
+                src={`${activePodcast.spotifyUrl}&theme=0&view=coverart `}
+                width="100%"
+                height="152"
+                frameBorder="0"
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                loading="lazy"
+                className="block rounded-t-2xl"
+                title={`Spotify: ${activePodcast.title}`}
+                onLoad={() => {
+                  // Spotify player loaded — hide the native audio player
+                  setShowSpotifyPlayer(true);
+                }}
+                onError={() => {
+                  // Spotify iframe failed — fall back to native audio player
+                  setShowSpotifyPlayer(false);
+                }}
+              />
+            ) : null}
 
-            {/* Play controls & Seek Progress */}
-            <div className="flex-1 flex flex-col gap-1.5 w-full">
-              <div className="flex items-center justify-center gap-3">
-                <button
-                  onClick={togglePlayPause}
-                  className="w-9 h-9 rounded-full bg-cyan text-void hover:bg-cyan-300 active:scale-95 transition-all flex items-center justify-center shadow-[0_0_15px_rgba(0,245,255,0.5)]"
-                >
-                  {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
-                </button>
-              </div>
-
-              {/* Audio Error Banner */}
-              {audioError && (
-                <div className="flex items-center gap-2 bg-amber/10 border border-amber/30 rounded-lg px-3 py-2">
-                  <AlertCircle className="w-4 h-4 text-amber flex-shrink-0" />
-                  <p className="text-[11px] text-amber font-medium">{audioError}</p>
+            {/* ── Native audio controls (shown when Spotify is unavailable) ── */}
+            {(!activePodcast.spotifyUrl || !showSpotifyPlayer) && (
+              <div className="flex flex-col md:flex-row items-center gap-3 p-3.5">
+                {/* Cover Art */}
+                <div className="w-12 h-12 rounded-xl overflow-hidden relative flex-shrink-0 bg-navy/60 border border-cyan/30 shadow-md">
+                  {activePodcast.coverUrl ? (
+                    <img src={activePodcast.coverUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-cyan/30 to-violet/30">
+                      <Disc className="w-6 h-6 text-cyan" />
+                    </div>
+                  )}
+                  {isPlaying && (
+                    <div className="absolute inset-0 bg-void/30 flex items-center justify-center">
+                      <Radio className="w-5 h-5 text-cyan animate-pulse" />
+                    </div>
+                  )}
                 </div>
+                <div className="overflow-hidden flex-1">
+                  <h4 className="text-xs font-exo font-bold text-[#F0F4FF] truncate leading-tight">{activePodcast.title}</h4>
+                  <p className="text-[10px] text-mist truncate mt-0.5">By {activePodcast.creatorName}</p>
+                </div>
+
+                {/* Play controls */}
+                <div className="flex-1 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-center gap-3">
+                    <button onClick={togglePlayPause}
+                      className="w-9 h-9 rounded-full bg-cyan text-void hover:bg-cyan-300 active:scale-95 transition-all flex items-center justify-center shadow-[0_0_15px_rgba(0,245,255,0.5)]">
+                      {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
+                    </button>
+                  </div>
+                  {/* Error banner */}
+                  {audioError && (
+                    <div className="flex items-center gap-2 bg-amber/10 border border-amber/30 rounded-lg px-3 py-1.5">
+                      <AlertCircle className="w-4 h-4 text-amber flex-shrink-0" />
+                      <p className="text-[11px] text-amber font-medium">{audioError}</p>
+                    </div>
+                  )}
+                  {/* Progress slider */}
+                  <div className="flex items-center gap-2 text-[10px] font-mono text-mist">
+                    <span>{formatDuration(currentTime)}</span>
+                    <input type="range" min={0} max={duration || 1} step={0.1}
+                      value={currentTime} onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                      className="flex-1 accent-cyan bg-ghost/40 h-1 rounded-lg cursor-pointer outline-none transition-all hover:h-1.5" />
+                    <span>{formatDuration(duration)}</span>
+                  </div>
+                </div>
+
+                {/* Volume */}
+                <div className="flex items-center gap-2">
+                  <button onClick={toggleMute} className="text-mist hover:text-cyan transition-colors">
+                    {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                  </button>
+                  <input type="range" min={0} max={1} step={0.05}
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                    className="w-16 accent-cyan bg-ghost/40 h-1 rounded cursor-pointer" />
+                </div>
+              </div>
+            )}
+
+            {/* ── Player footer: info + close ── */}
+            <div className="flex items-center justify-between px-3.5 py-2 border-t border-cyan/10">
+              <div className="overflow-hidden">
+                <p className="text-[11px] font-exo font-bold text-[#F0F4FF] truncate">{activePodcast.title}</p>
+                <p className="text-[9px] text-mist truncate">{activePodcast.creatorName} · {activePodcast.spotifyUrl ? 'Spotify' : 'Native Player'}</p>
+              </div>
+              {activePodcast.spotifyUrl && (
+                <a href={activePodcast.spotifyUrl.replace('/embed/', '/').split('?')[0]}
+                   target="_blank" rel="noopener noreferrer"
+                   className="text-[9px] text-green/60 hover:text-green-400 transition-colors ml-3 flex-shrink-0 flex items-center gap-1">
+                  Open in Spotify ↗
+                </a>
               )}
-
-              {/* Progress Slider */}
-              <div className="flex items-center gap-2 text-[10px] font-mono text-mist">
-                <span>{formatDuration(currentTime)}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 1}
-                  step={0.1}
-                  value={currentTime}
-                  onChange={(e) => handleSeek(parseFloat(e.target.value))}
-                  className="flex-1 accent-cyan bg-ghost/40 h-1 rounded-lg cursor-pointer outline-none transition-all hover:h-1.5"
-                />
-                <span>{formatDuration(duration)}</span>
-              </div>
-            </div>
-
-            {/* Volume controls & close */}
-            <div className="flex items-center justify-between w-full md:w-auto gap-3 border-t md:border-t-0 pt-2 md:pt-0 border-ghost/40">
-              <div className="flex items-center gap-2">
-                <button onClick={toggleMute} className="text-mist hover:text-cyan transition-colors">
-                  {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                  className="w-16 accent-cyan bg-ghost/40 h-1 rounded cursor-pointer"
-                />
-              </div>
-
-              <button
-                onClick={() => setActivePodcast(null)}
-                className="p-1 rounded-full hover:bg-ghost/30 text-mist hover:text-white transition-all ml-auto md:ml-0"
-              >
+              <button onClick={() => { setActivePodcast(null); setShowSpotifyPlayer(false); }}
+                className="p-1 rounded-full hover:bg-ghost/30 text-mist hover:text-white transition-all ml-3 flex-shrink-0">
                 <X className="w-4 h-4" />
               </button>
             </div>
           </motion.div>
         )}
-      </AnimatePresence>
-
-      {/* Support Creator Modal */}
+      </AnimatePresence>      {/* Support Creator Modal */}
       <Modal
         isOpen={!!supportModal}
         onClose={() => setSupportModal(null)}
