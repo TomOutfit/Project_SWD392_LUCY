@@ -672,41 +672,6 @@ if (pCount < 25) {
       listenCount: 1480,
       spotifyUrl: null
     },
-  ];
-    {
-      id: 'podcast-en-002',
-      roomId: 'room-en-002',
-      roomName: 'English Speaking Course',
-      creatorId: 1,
-      creatorName: 'English Speaking Course',
-      title: 'Daily English Conversations for Beginners | 30-Minute Marathon',
-      description: '30 minutes of daily English conversations at beginner A1-A2 level. Natural dialogues: at the restaurant, shopping, asking directions.',
-      durationSec: 1830,
-      fileUrl: 'https://www.youtube.com/embed/0Edw8BpLJpM',
-      coverUrl: 'https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?q=80&w=800&auto=format&fit=crop',
-      language: 'EN',
-      levelName: 'Level 8 - Beginner English',
-      createdAt: new Date(Date.now() - 3600000 * 8).toISOString(),
-      listenCount: 7310,
-      spotifyUrl: null
-    },
-    {
-      id: 'podcast-en-003',
-      roomId: 'room-en-003',
-      roomName: 'ABC Learning English',
-      creatorId: 1,
-      creatorName: 'ABC Learning English',
-      title: 'Daily Life Slow English | Travel & Conversation (A2-B1)',
-      description: 'Daily life slow English conversation with subtitles. Topics: traveling, airport, ordering food. Perfect for shadowing practice.',
-      durationSec: 900,
-      fileUrl: 'https://www.youtube.com/embed/V7sLqYbyv8I',
-      coverUrl: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=800&auto=format&fit=crop',
-      language: 'EN',
-      levelName: 'Level 16 - Pre-Intermediate',
-      createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-      listenCount: 6540,
-      spotifyUrl: null
-    },
 
     // ── Japanese ──
     {
