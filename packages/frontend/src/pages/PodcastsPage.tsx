@@ -103,6 +103,9 @@ export default function PodcastsPage() {
   useEffect(() => {
     if (!audioRef.current) return;
 
+    // If embedType already set, embedded player handles playback — skip native audio entirely
+    if (embedType !== null) return;
+
     if (activePodcast) {
       const { url: embedUrl, type } = getEmbedUrl(activePodcast);
       setEmbedType(type);
@@ -152,7 +155,7 @@ export default function PodcastsPage() {
       audioRef.current.src = '';
       setIsPlaying(false);
     }
-  }, [activePodcast]);
+  }, [activePodcast, embedType]);
 
   const togglePlayPause = () => {
     if (!activePodcast) return;
