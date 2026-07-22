@@ -6,6 +6,7 @@ import { usersApi, sessionsApi } from '@/lib/api';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import type { LeaderboardEntry } from '@/types/index';
+import { getAnonymousName } from '@/utils/anonymous';
 
 interface StudyRankEntry {
   rank: number;
@@ -59,7 +60,14 @@ export default function LeaderboardPage() {
       .finally(finish);
 
     fetchStudyLeaderboard()
-      .then(setStudyEntries)
+      .then(data => {
+        // Transform to anonymous names for privacy
+        const anonymized = data.map(entry => ({
+          ...entry,
+          displayName: getAnonymousName(entry.userId, 'LUCY'),
+        }));
+        setStudyEntries(anonymized);
+      })
       .catch(() => setStudyEntries([]))
       .finally(finish);
 

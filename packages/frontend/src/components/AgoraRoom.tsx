@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { GIFT_TYPES } from '@/types/index';
 import { walletApi, roomsApi } from '@/lib/api';
+import { getAnonymousName } from '@/utils/anonymous';
 import toast from 'react-hot-toast';
 
 export function AgoraRoom() {
@@ -57,6 +58,12 @@ export function AgoraRoom() {
   }
   const [particles, setParticles] = useState<GiftParticle[]>([]);
   const prevGiftEventsRef = useRef<string[]>([]);
+
+  // Deterministic anonymous names for all users — consistent per session
+  const nameMap: Record<number, string> = {};
+  for (const p of participants) {
+    nameMap[p.oderId] = getAnonymousName(p.oderId, p.oderRole);
+  }
 
   useEffect(() => {
     giftEvents.forEach(evt => {
@@ -285,8 +292,8 @@ export function AgoraRoom() {
               {handQueue.map((p, i) => (
                 <div key={p.oderId} className="flex items-center gap-2 p-2 rounded-lg bg-navy border border-ghost">
                   <span className="text-xs text-mist w-4">{i + 1}.</span>
-                  <Avatar personaId={p.oderPersonaId} name={p.oderName} size="xs" />
-                  <span className="text-xs font-exo text-[#F0F4FF] flex-1 truncate">{p.oderName}</span>
+                  <Avatar personaId={p.oderPersonaId} name={nameMap[p.oderId] ?? p.oderName} size="xs" />
+                  <span className="text-xs font-exo text-[#F0F4FF] flex-1 truncate">{nameMap[p.oderId] ?? p.oderName}</span>
                   <Button variant="secondary" size="xs" onClick={() => grantSpeak(p.oderId)}>Grant</Button>
                 </div>
               ))}
@@ -689,9 +696,9 @@ export function AgoraRoom() {
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-xl bg-midnight border border-ghost">
-              <Avatar personaId={user.personaId} name={me?.oderName || user.displayName} size="md" showBadge role={user.role} />
+              <Avatar personaId={user.personaId} name={nameMap[user.id] ?? me?.oderName ?? user.displayName} size="md" showBadge role={user.role} />
               <div className="flex-1">
-                <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{me?.oderName || user.displayName} <span className="text-mist">(You)</span></p>
+                <p className="text-sm font-exo font-semibold text-[#F0F4FF]">{nameMap[user.id] ?? me?.oderName ?? user.displayName} <span className="text-mist">(You)</span></p>
                 <p className="text-xs text-mist">
                   {isSpeaking ? 'Speaking' : isMuted ? 'Muted' : 'Ready to speak'}
                 </p>
@@ -784,8 +791,8 @@ export function AgoraRoom() {
                     {p.isSpeaking && !p.isMuted && (
                       <span className="absolute inset-0 rounded-full border border-cyan/40 animate-ping opacity-75 max-w-[48px] mx-auto" />
                     )}
-                    <Avatar personaId={p.oderPersonaId} name={p.oderName} size="lg" showBadge role={p.oderRole} />
-                    
+                    <Avatar personaId={p.oderPersonaId} name={nameMap[p.oderId] ?? p.oderName} size="lg" showBadge role={p.oderRole} />
+
                     <span className={`absolute bottom-0 right-[calc(50%-24px)] flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-bold border ${
                       p.isSpeaking && !p.isMuted
                         ? 'bg-cyan text-void border-cyan shadow-sm animate-pulse'
@@ -795,7 +802,7 @@ export function AgoraRoom() {
                     </span>
                   </div>
 
-                  <p className="text-xs font-exo font-bold text-[#F0F4FF] truncate">{p.oderName}</p>
+                  <p className="text-xs font-exo font-bold text-[#F0F4FF] truncate">{nameMap[p.oderId] ?? p.oderName}</p>
                   
                   <div className="flex items-center justify-center gap-1.5 mt-1 text-[10px] text-mist font-semibold">
                     <Badge variant={p.oderRole === 'SUPER' ? 'magenta' : p.oderRole === 'PRO' ? 'violet' : 'cyan'} className="px-1 py-0 text-[8px] font-bold">
@@ -835,7 +842,7 @@ export function AgoraRoom() {
                   {isHost && p.oderId !== user?.id && (
                     <div className="opacity-0 group-hover:opacity-100 transition-all duration-200 absolute inset-0 bg-[#0c0c1edf]/95 flex flex-col justify-center items-center gap-2 p-3 rounded-xl border border-cyan/40 z-10 backdrop-blur-sm">
                       <p className="text-[10px] font-orbitron font-black text-cyan truncate max-w-full tracking-wider">
-                        {p.oderName}
+                        {nameMap[p.oderId] ?? p.oderName}
                       </p>
                       
                       {p.isSpeaking ? (
@@ -982,10 +989,10 @@ export function AgoraRoom() {
           <div className="mt-4 flex gap-2 flex-wrap">
             {participants.filter(p => p.oderId !== user?.id).map((p, idx) => (
               <button key={`${p.oderId}-${idx}`}
-                onClick={() => handleSendGift(p.oderId, p.oderName)}
+                onClick={() => handleSendGift(p.oderId, nameMap[p.oderId] ?? p.oderName)}
                 className="flex-1 p-2 rounded-lg bg-navy border border-ghost hover:border-cyan transition-all text-center min-w-[80px]">
-                <Avatar personaId={p.oderPersonaId} name={p.oderName} size="sm" className="mx-auto mb-1" />
-                <p className="text-xs text-mist truncate">{p.oderName}</p>
+                <Avatar personaId={p.oderPersonaId} name={nameMap[p.oderId] ?? p.oderName} size="sm" className="mx-auto mb-1" />
+                <p className="text-xs text-mist truncate">{nameMap[p.oderId] ?? p.oderName}</p>
               </button>
             ))}
           </div>

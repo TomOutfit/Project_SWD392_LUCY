@@ -8,6 +8,7 @@ import { roomsApi, sessionsApi } from '@/lib/api';
 import { Room } from '@/types/index';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
+import { getAnonymousName } from '@/utils/anonymous';
 
 const giftStats = [
   { type: 'Crown 👑', count: 4, value: 400, color: 'text-amber' },
@@ -77,7 +78,11 @@ export default function DashboardPage() {
     if (!user?.id) return;
     sessionsApi.history(user.id)
       .then(r => {
-        setSessionHistory(r.data?.sessions || []);
+        const sessions = (r.data?.sessions || []).map((s: any) => ({
+          ...s,
+          hostName: getAnonymousName(s.hostId, 'LUCY'),
+        }));
+        setSessionHistory(sessions);
         setTotalXp(r.data?.totalXp || 0);
         setTotalSpeakingSec(r.data?.totalSpeakingSec || 0);
       })
@@ -96,7 +101,7 @@ export default function DashboardPage() {
   const activeStudents = selectedRooms.flatMap(room =>
     (room.participants || []).map(p => ({
       id: p.oderId,
-      name: p.oderName,
+      name: getAnonymousName(p.oderId, p.oderRole ?? 'LUCY'),
       role: p.oderRole as 'LUCY' | 'PRO' | 'SUPER',
       personaId: p.oderPersonaId,
       joinedDurationMin: Math.max(1, Math.round((Date.now() - new Date(p.joinedAt).getTime()) / 60000)),
