@@ -135,4 +135,42 @@ if (count === 0) {
   console.log('Seeded 100 levels into database.');
 }
 
+// Seed sample podcasts if table is empty
+const { count: pCount } = sqlite.prepare('SELECT COUNT(*) as count FROM podcasts').get() as { count: number };
+if (pCount === 0) {
+  const insertPod = sqlite.prepare(`
+    INSERT INTO podcasts (id, room_id, room_name, creator_id, creator_name, title, duration_sec, file_url, language, level_name, created_at, listen_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertPod.run(
+    'sample-podcast-1',
+    'room-sample-1',
+    'English Fluency Practice',
+    1,
+    'Sarah Jenkins',
+    'Mastering Daily English Communication & Pronunciation',
+    184,
+    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+    'EN',
+    'Level 12 - Intermediate English',
+    new Date().toISOString(),
+    42
+  );
+  insertPod.run(
+    'sample-podcast-2',
+    'room-sample-2',
+    'Japanese Culture & Daily Conversation',
+    2,
+    'Kenji Sato',
+    'Essential Japanese Greetings & Conversational Etiquette',
+    215,
+    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+    'JA',
+    'Level 45 - Beginner Japanese',
+    new Date(Date.now() - 86400000).toISOString(),
+    128
+  );
+  console.log('Seeded sample podcasts into database.');
+}
+
 export default db;

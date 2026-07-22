@@ -983,7 +983,6 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     const roomId = currentRoom?.id ?? null;
     const socketRef = socket;
     const recorder = mediaRecorder;
-    const podcastId = get().currentPodcastId;
     const chunksRef = [...get().recordedChunks];
 
     set({

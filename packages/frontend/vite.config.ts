@@ -19,6 +19,7 @@ export default defineConfig({
       "/api/levels": "http://localhost:3001",
       "/api/rooms": "http://localhost:3001",
       "/api/podcasts": "http://localhost:3001",
+      "/uploads": "http://localhost:3001",
     },
   },
 });

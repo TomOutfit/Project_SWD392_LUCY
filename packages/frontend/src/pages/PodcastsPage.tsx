@@ -57,16 +57,25 @@ export default function PodcastsPage() {
     if (!audioRef.current) return;
 
     if (activePodcast) {
+      if (!activePodcast.fileUrl) {
+        toast.error('No audio recording available for this podcast');
+        setIsPlaying(false);
+        return;
+      }
+
       const audioUrl = activePodcast.fileUrl.startsWith('http')
         ? activePodcast.fileUrl
         : `${import.meta.env.VITE_NJS_URL || ''}${activePodcast.fileUrl}`;
       
       audioRef.current.src = audioUrl;
+      audioRef.current.volume = isMuted ? 0 : volume;
+      audioRef.current.muted = isMuted;
       audioRef.current.load();
       audioRef.current.play()
         .then(() => setIsPlaying(true))
         .catch(err => {
           console.warn('[PodcastsPage] Playback failed or interrupted:', err);
+          toast.error('Could not play audio track. Please check file format or URL.');
           setIsPlaying(false);
         });
     } else {
@@ -76,16 +85,34 @@ export default function PodcastsPage() {
     }
   }, [activePodcast]);
 
+  const togglePlayPause = () => {
+    if (!audioRef.current || !activePodcast) return;
+    if (!activePodcast.fileUrl) {
+      toast.error('No audio recording available for this podcast');
+      return;
+    }
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play()
+        .then(() => setIsPlaying(true))
+        .catch(err => {
+          console.warn('[PodcastsPage] Playback failed:', err);
+          toast.error('Playback failed. Please try again.');
+          setIsPlaying(false);
+        });
+    }
+  };
+
   const handlePlayPodcast = async (podcast: Podcast) => {
+    if (!podcast.fileUrl) {
+      toast.error('No audio recording available for this podcast');
+      return;
+    }
+
     if (activePodcast?.id === podcast.id) {
-      if (isPlaying) {
-        audioRef.current?.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current?.play()
-          .then(() => setIsPlaying(true))
-          .catch(console.error);
-      }
+      togglePlayPause();
       return;
     }
 
@@ -108,12 +135,21 @@ export default function PodcastsPage() {
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime);
+      const dur = audioRef.current.duration;
+      if (dur && isFinite(dur) && dur > 0) {
+        setDuration(dur);
+      }
     }
   };
 
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
-      setDuration(audioRef.current.duration || activePodcast?.durationSec || 0);
+      const dur = audioRef.current.duration;
+      if (dur && isFinite(dur) && dur > 0) {
+        setDuration(dur);
+      } else if (activePodcast?.durationSec) {
+        setDuration(activePodcast.durationSec);
+      }
     }
   };
 
@@ -204,7 +240,7 @@ export default function PodcastsPage() {
   };
 
   const formatDuration = (sec: number) => {
-    if (isNaN(sec)) return '0:00';
+    if (!sec || isNaN(sec) || !isFinite(sec) || sec < 0) return '0:00';
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
@@ -229,6 +265,11 @@ export default function PodcastsPage() {
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}
+        onError={(e) => {
+          console.error('[PodcastsPage] Audio element error:', e);
+          toast.error('Audio stream could not be loaded');
+          setIsPlaying(false);
+        }}
       />
 
       <div className="absolute top-[10%] left-[-10%] w-[50%] h-[50%] bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.05),transparent_50%)] blur-[100px] pointer-events-none" />
@@ -405,11 +446,7 @@ export default function PodcastsPage() {
             <div className="flex-1 flex flex-col gap-1.5 w-full">
               <div className="flex items-center justify-center gap-3">
                 <button
-                  onClick={() => setIsPlaying(prev => {
-                    if (prev) audioRef.current?.pause();
-                    else audioRef.current?.play().catch(console.error);
-                    return !prev;
-                  })}
+                  onClick={togglePlayPause}
                   className="w-8 h-8 rounded-full bg-cyan text-void hover:bg-cyan-300 active:scale-95 transition-all flex items-center justify-center"
                 >
                   {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
