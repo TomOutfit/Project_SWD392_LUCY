@@ -894,26 +894,33 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket as any).emit('start-recording', { roomId: currentRoom.id });
 
-    const audioContext = new AudioContext();
-    if (audioContext.state === 'suspended') {
-      audioContext.resume();
-    }
+    // ── Step 1: Acquire raw mic stream explicitly ─────────────────────────────
+    // Only the microphone track is captured — no system audio, no Agora internals.
+    navigator.mediaDevices.getUserMedia({ audio: {
+      channelCount: 1,       // mono — voice only
+      sampleRate: 16000,     // optimal for speech coding
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    }}).then((micStream) => {
+      // ── Step 2: Build a clean AudioContext pipeline ──────────────────────────
+      // Separate AudioContext for recording, isolated from Agora's analyser graph.
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
 
-    // Capture mic directly via getUserMedia — bypasses Agora's muted state
-    // so the recording always contains the user's voice regardless of mute toggle.
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((micStream) => {
-      const dest = audioContext.createMediaStreamDestination();
       const micSource = audioContext.createMediaStreamSource(micStream);
-      micSource.connect(dest);
+      const dest = audioContext.createMediaStreamDestination();
 
-      // Also grab remote audio from Agora's audio context if available.
-      const { audioContext: agoraCtx, agoraClient } = get();
-      if (agoraCtx && agoraClient) {
+      // Also capture remote Agora audio into the recording.
+      const { agoraClient } = get();
+      if (agoraClient) {
         agoraClient.remoteUsers.forEach((user) => {
           if (user.hasAudio && user.audioTrack) {
             try {
               const remoteTrack = user.audioTrack.getMediaStreamTrack();
-              const remoteSource = agoraCtx.createMediaStreamSource(new MediaStream([remoteTrack]));
+              const remoteSource = audioContext.createMediaStreamSource(new MediaStream([remoteTrack]));
               remoteSource.connect(dest);
             } catch (err) {
               console.warn('[roomStore] Could not add remote user to recording stream:', err);
@@ -922,8 +929,16 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         });
       }
 
+      // Connect mic to destination — MediaRecorder records ONLY this stream.
+      micSource.connect(dest);
+      // Note: do NOT connect micSource to audioContext.destination here —
+      // that would cause feedback/echo. Self-monitoring is handled by the
+      // volume monitor's own audio graph (source → analyser → gainNode → destination).
+
+      // ── Step 3: Create MediaRecorder from the destination stream ─────────────
       const stream = dest.stream;
       const chunks: Blob[] = [];
+
       let options = { mimeType: 'audio/webm;codecs=opus' };
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
         options = { mimeType: 'audio/webm' };
@@ -947,7 +962,6 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       recorder.onstop = () => {
         audioContext.close();
         micStream.getTracks().forEach((t) => t.stop());
-        // Do NOT clear recordedChunks here so the upload task can access them!
       };
 
       recorder.start(1000);
@@ -964,6 +978,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       });
     }).catch((err) => {
       console.error('[roomStore] Failed to get microphone for recording:', err);
+      import('react-hot-toast').then(({ toast }) => {
+        toast.error('Could not access microphone. Please allow mic permission and try again.');
+      });
     });
   },
 

@@ -24,6 +24,7 @@ export default function PodcastsPage() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Title editing state
@@ -75,6 +76,7 @@ export default function PodcastsPage() {
       
       const attemptPlay = (url: string, isFallback: boolean = false) => {
         if (!audioRef.current) return;
+        setAudioError(null);
         audioRef.current.src = url;
         audioRef.current.volume = isMuted ? 0 : volume;
         audioRef.current.muted = isMuted;
@@ -82,12 +84,14 @@ export default function PodcastsPage() {
         audioRef.current.play()
           .then(() => setIsPlaying(true))
           .catch(err => {
-            console.warn('[PodcastsPage] Primary playback attempt failed:', err);
-            if (!isFallback) {
-              // Try secondary spoken voice fallback
-              attemptPlay('/uploads/podcasts/podcast-en-1.wav', true);
+            console.warn('[PodcastsPage] Playback error:', err);
+            // If primary URL fails, check if this is the primary and has a meaningful fileUrl
+            if (!isFallback && activePodcast?.fileUrl) {
+              // Primary URL (NJS-hosted) failed — try the original fileUrl directly
+              attemptPlay(activePodcast.fileUrl, true);
             } else {
-              // Graceful pause if browser blocked autoplay or user interaction required
+              // Fallback also failed or no fileUrl available — show error
+              setAudioError('Audio unavailable. The recording may not have been saved yet.');
               setIsPlaying(false);
             }
           });
@@ -111,8 +115,16 @@ export default function PodcastsPage() {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
+      if (audioError) {
+        // Retry loading from primary URL
+        const primaryUrl = activePodcast.fileUrl.startsWith('http')
+          ? activePodcast.fileUrl
+          : `${import.meta.env.VITE_NJS_URL || ''}${activePodcast.fileUrl}`;
+        audioRef.current.src = primaryUrl;
+        audioRef.current.load();
+      }
       audioRef.current.play()
-        .then(() => setIsPlaying(true))
+        .then(() => { setIsPlaying(true); setAudioError(null); })
         .catch(err => {
           console.warn('[PodcastsPage] Playback failed:', err);
           toast.error('Playback failed. Please try again.');
@@ -135,6 +147,7 @@ export default function PodcastsPage() {
     setActivePodcast(podcast);
     setIsPlaying(false);
     setCurrentTime(0);
+    setAudioError(null);
     setDuration(podcast.durationSec || 0);
 
     // Call API to register list count increment
@@ -292,8 +305,12 @@ export default function PodcastsPage() {
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}
         onError={(e) => {
-          console.error('[PodcastsPage] Audio element error:', e);
-          toast.error('Audio stream could not be loaded');
+          // MEDIASRC_NOT_FOUND (4) means the file URL doesn't exist on the server.
+          // MEDIA_ERR_NETWORK (2) means network/cors issue.
+          const audioEl = e.currentTarget as HTMLAudioElement;
+          const errorCode = audioEl.error?.code;
+          console.warn('[PodcastsPage] Audio error code:', errorCode, audioEl.error?.message);
+          setAudioError('Audio unavailable. The recording may not have been saved yet.');
           setIsPlaying(false);
         }}
       />
@@ -446,13 +463,13 @@ export default function PodcastsPage() {
                       {/* Dark Gradient Overlay */}
                       <div className="absolute inset-0 bg-gradient-to-t from-void/90 via-void/20 to-transparent opacity-75 group-hover:opacity-50 transition-opacity" />
 
-                      {/* Missing audio indicator */}
-                      {!podcast.fileUrl && (
+                      {/* Audio status indicator */}
+                      {!podcast.fileUrl ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-void/80 z-10">
                           <AlertCircle className="w-6 h-6 text-amber" />
-                          <span className="text-[10px] text-amber font-exo font-bold uppercase tracking-wider">No Audio</span>
+                          <span className="text-[10px] text-amber font-exo font-bold uppercase tracking-wider">No Recording</span>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Spotify-style Green/Cyan Floating Play Button */}
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -608,6 +625,14 @@ export default function PodcastsPage() {
                   {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
                 </button>
               </div>
+
+              {/* Audio Error Banner */}
+              {audioError && (
+                <div className="flex items-center gap-2 bg-amber/10 border border-amber/30 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-4 h-4 text-amber flex-shrink-0" />
+                  <p className="text-[11px] text-amber font-medium">{audioError}</p>
+                </div>
+              )}
 
               {/* Progress Slider */}
               <div className="flex items-center gap-2 text-[10px] font-mono text-mist">
