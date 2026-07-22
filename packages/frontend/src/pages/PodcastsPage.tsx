@@ -26,7 +26,6 @@ export default function PodcastsPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const spotifyIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [showSpotifyPlayer, setShowSpotifyPlayer] = useState(false);
 
   // Title editing state
@@ -61,14 +60,34 @@ export default function PodcastsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Determine the Spotify embed URL for the active podcast
-  // Priority: fileUrl (episode-level) > spotifyUrl (show-level)
-  const getSpotifyEmbedUrl = (podcast: Podcast): string | null => {
-    if (podcast.fileUrl && podcast.fileUrl.includes('open.spotify.com')) {
-      return podcast.fileUrl;
+  // Determine the embed URL for the active podcast — YouTube takes priority, then Spotify
+  const getEmbedUrl = (podcast: Podcast): { url: string | null; type: 'youtube' | 'spotify' | null } => {
+    if (podcast.fileUrl) {
+      if (podcast.fileUrl.includes('youtube.com') || podcast.fileUrl.includes('youtu.be')) {
+        const videoId = extractYouTubeId(podcast.fileUrl);
+        if (videoId) return { url: `https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0`, type: 'youtube' };
+      }
+      if (podcast.fileUrl.includes('open.spotify.com')) {
+        return { url: podcast.fileUrl, type: 'spotify' };
+      }
     }
-    if (podcast.spotifyUrl && podcast.spotifyUrl.includes('open.spotify.com')) {
-      return podcast.spotifyUrl;
+    if (podcast.spotifyUrl) {
+      if (podcast.spotifyUrl.includes('open.spotify.com')) {
+        return { url: podcast.spotifyUrl, type: 'spotify' };
+      }
+    }
+    return { url: null, type: null };
+  };
+
+  const extractYouTubeId = (url: string): string | null => {
+    const patterns = [
+      /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+      /youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/,
+      /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    ];
+    for (const p of patterns) {
+      const m = url.match(p);
+      if (m) return m[1];
     }
     return null;
   };
@@ -78,8 +97,8 @@ export default function PodcastsPage() {
     if (!audioRef.current) return;
 
     if (activePodcast) {
-      const embedUrl = getSpotifyEmbedUrl(activePodcast);
-      // Spotify handles playback via iframe — skip native audio
+      const { url: embedUrl } = getEmbedUrl(activePodcast);
+      // Embedded player (YouTube or Spotify) handles playback — skip native audio
       if (embedUrl) {
         setShowSpotifyPlayer(true);
         audioRef.current.pause();
@@ -158,7 +177,7 @@ export default function PodcastsPage() {
   };
 
   const handlePlayPodcast = async (podcast: Podcast) => {
-    const embedUrl = getSpotifyEmbedUrl(podcast);
+    const { url: embedUrl } = getEmbedUrl(podcast);
     if (!embedUrl && !podcast.fileUrl) {
       toast.error('No audio recording available for this podcast');
       return;
@@ -609,8 +628,8 @@ export default function PodcastsPage() {
         )}
       </motion.div>
 
-      {/* ── Podcast Player ────────────────────────────────────────────── */}
-      {/* Spotify iframe takes priority for rich playback; falls back to native audio */}
+      {/* ── Podcast Player ─────────────────────────────────────────── */}
+      {/* YouTube/Spotify iframe embeds for direct playback; native audio as fallback */}
       <AnimatePresence>
         {activePodcast && (
           <motion.div
@@ -620,12 +639,29 @@ export default function PodcastsPage() {
             transition={{ type: 'spring', damping: 20 }}
             className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:w-[820px] md:-translate-x-1/2 z-50 rounded-2xl glass border border-cyan/40 bg-[#0A0B1B]/95 shadow-[0_10px_35px_rgba(0,245,255,0.2)] overflow-hidden"
           >
-            {/* ── Spotify iframe player (full-width when available) ── */}
-            {getSpotifyEmbedUrl(activePodcast) ? (
+            {/* ── YouTube iframe ── */}
+            {getEmbedUrl(activePodcast).type === 'youtube' && (
               <iframe
                 key={activePodcast.id}
-                ref={spotifyIframeRef}
-                src={`${getSpotifyEmbedUrl(activePodcast)}&theme=0`}
+                src={getEmbedUrl(activePodcast).url!}
+                width="100%"
+                height="250"
+                srcDoc=""
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                loading="lazy"
+                className="block"
+                title={`YouTube: ${activePodcast.title}`}
+                onLoad={() => setShowSpotifyPlayer(true)}
+              />
+            )}
+
+            {/* ── Spotify iframe ── */}
+            {getEmbedUrl(activePodcast).type === 'spotify' && (
+              <iframe
+                key={activePodcast.id}
+                src={`${getEmbedUrl(activePodcast).url!}&theme=0`}
                 width="100%"
                 height="152"
                 frameBorder="0"
@@ -636,12 +672,11 @@ export default function PodcastsPage() {
                 onLoad={() => setShowSpotifyPlayer(true)}
                 onError={() => setShowSpotifyPlayer(false)}
               />
-            ) : null}
+            )}
 
-            {/* ── Native audio controls (shown when Spotify is unavailable) ── */}
-            {(!getSpotifyEmbedUrl(activePodcast) || !showSpotifyPlayer) && (
+            {/* ── Native audio controls (fallback when no embed available) ── */}
+            {(getEmbedUrl(activePodcast).type === null || !showSpotifyPlayer) && (
               <div className="flex flex-col md:flex-row items-center gap-3 p-3.5">
-                {/* Cover Art */}
                 <div className="w-12 h-12 rounded-xl overflow-hidden relative flex-shrink-0 bg-navy/60 border border-cyan/30 shadow-md">
                   {activePodcast.coverUrl ? (
                     <img src={activePodcast.coverUrl} alt="" className="w-full h-full object-cover" />
@@ -669,14 +704,12 @@ export default function PodcastsPage() {
                       {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
                     </button>
                   </div>
-                  {/* Error banner */}
                   {audioError && (
                     <div className="flex items-center gap-2 bg-amber/10 border border-amber/30 rounded-lg px-3 py-1.5">
                       <AlertCircle className="w-4 h-4 text-amber flex-shrink-0" />
                       <p className="text-[11px] text-amber font-medium">{audioError}</p>
                     </div>
                   )}
-                  {/* Progress slider */}
                   <div className="flex items-center gap-2 text-[10px] font-mono text-mist">
                     <span>{formatDuration(currentTime)}</span>
                     <input type="range" min={0} max={duration || 1} step={0.1}
@@ -699,13 +732,25 @@ export default function PodcastsPage() {
               </div>
             )}
 
-            {/* ── Player footer: info + close ── */}
+            {/* ── Player footer: info + external link + close ── */}
             <div className="flex items-center justify-between px-3.5 py-2 border-t border-cyan/10">
               <div className="overflow-hidden">
                 <p className="text-[11px] font-exo font-bold text-[#F0F4FF] truncate">{activePodcast.title}</p>
+                <p className="text-[9px] text-mist truncate">
+                  By {activePodcast.creatorName}
+                  {getEmbedUrl(activePodcast).type === 'youtube' && ' · YouTube'}
+                  {getEmbedUrl(activePodcast).type === 'spotify' && ' · Spotify'}
+                </p>
               </div>
-              {getSpotifyEmbedUrl(activePodcast) && (
-                <a href={getSpotifyEmbedUrl(activePodcast)!.replace('/embed/', '/').split('?')[0]}
+              {getEmbedUrl(activePodcast).type === 'youtube' && (
+                <a href={`https://www.youtube.com/watch?v=${extractYouTubeId(activePodcast.fileUrl)}`}
+                   target="_blank" rel="noopener noreferrer"
+                   className="text-[9px] text-red-400/60 hover:text-red-400 transition-colors ml-3 flex-shrink-0 flex items-center gap-1">
+                  Open on YouTube ↗
+                </a>
+              )}
+              {getEmbedUrl(activePodcast).type === 'spotify' && (
+                <a href={getEmbedUrl(activePodcast).url!.replace('/embed/', '/').split('?')[0]}
                    target="_blank" rel="noopener noreferrer"
                    className="text-[9px] text-green/60 hover:text-green-400 transition-colors ml-3 flex-shrink-0 flex items-center gap-1">
                   Open in Spotify ↗
@@ -718,7 +763,8 @@ export default function PodcastsPage() {
             </div>
           </motion.div>
         )}
-      </AnimatePresence>      {/* Support Creator Modal */}
+      </AnimatePresence>
+      {/* Support Creator Modal */}
       <Modal
         isOpen={!!supportModal}
         onClose={() => setSupportModal(null)}
