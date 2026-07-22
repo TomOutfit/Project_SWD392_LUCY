@@ -61,13 +61,26 @@ export default function PodcastsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Determine the Spotify embed URL for the active podcast
+  // Priority: fileUrl (episode-level) > spotifyUrl (show-level)
+  const getSpotifyEmbedUrl = (podcast: Podcast): string | null => {
+    if (podcast.fileUrl && podcast.fileUrl.includes('open.spotify.com')) {
+      return podcast.fileUrl;
+    }
+    if (podcast.spotifyUrl && podcast.spotifyUrl.includes('open.spotify.com')) {
+      return podcast.spotifyUrl;
+    }
+    return null;
+  };
+
   // Handle active audio source loading
   useEffect(() => {
     if (!audioRef.current) return;
 
     if (activePodcast) {
+      const embedUrl = getSpotifyEmbedUrl(activePodcast);
       // Spotify handles playback via iframe — skip native audio
-      if (activePodcast.spotifyUrl) {
+      if (embedUrl) {
         setShowSpotifyPlayer(true);
         audioRef.current.pause();
         audioRef.current.src = '';
@@ -145,8 +158,8 @@ export default function PodcastsPage() {
   };
 
   const handlePlayPodcast = async (podcast: Podcast) => {
-    // Spotify URLs load via iframe — no native audio check needed
-    if (!podcast.spotifyUrl && !podcast.fileUrl) {
+    const embedUrl = getSpotifyEmbedUrl(podcast);
+    if (!embedUrl && !podcast.fileUrl) {
       toast.error('No audio recording available for this podcast');
       return;
     }
@@ -608,11 +621,11 @@ export default function PodcastsPage() {
             className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:w-[820px] md:-translate-x-1/2 z-50 rounded-2xl glass border border-cyan/40 bg-[#0A0B1B]/95 shadow-[0_10px_35px_rgba(0,245,255,0.2)] overflow-hidden"
           >
             {/* ── Spotify iframe player (full-width when available) ── */}
-            {activePodcast.spotifyUrl ? (
+            {getSpotifyEmbedUrl(activePodcast) ? (
               <iframe
                 key={activePodcast.id}
                 ref={spotifyIframeRef}
-                src={`${activePodcast.spotifyUrl}&theme=0&view=coverart `}
+                src={`${getSpotifyEmbedUrl(activePodcast)}&theme=0`}
                 width="100%"
                 height="152"
                 frameBorder="0"
@@ -620,19 +633,13 @@ export default function PodcastsPage() {
                 loading="lazy"
                 className="block rounded-t-2xl"
                 title={`Spotify: ${activePodcast.title}`}
-                onLoad={() => {
-                  // Spotify player loaded — hide the native audio player
-                  setShowSpotifyPlayer(true);
-                }}
-                onError={() => {
-                  // Spotify iframe failed — fall back to native audio player
-                  setShowSpotifyPlayer(false);
-                }}
+                onLoad={() => setShowSpotifyPlayer(true)}
+                onError={() => setShowSpotifyPlayer(false)}
               />
             ) : null}
 
             {/* ── Native audio controls (shown when Spotify is unavailable) ── */}
-            {(!activePodcast.spotifyUrl || !showSpotifyPlayer) && (
+            {(!getSpotifyEmbedUrl(activePodcast) || !showSpotifyPlayer) && (
               <div className="flex flex-col md:flex-row items-center gap-3 p-3.5">
                 {/* Cover Art */}
                 <div className="w-12 h-12 rounded-xl overflow-hidden relative flex-shrink-0 bg-navy/60 border border-cyan/30 shadow-md">
@@ -696,10 +703,9 @@ export default function PodcastsPage() {
             <div className="flex items-center justify-between px-3.5 py-2 border-t border-cyan/10">
               <div className="overflow-hidden">
                 <p className="text-[11px] font-exo font-bold text-[#F0F4FF] truncate">{activePodcast.title}</p>
-                <p className="text-[9px] text-mist truncate">{activePodcast.creatorName} · {activePodcast.spotifyUrl ? 'Spotify' : 'Native Player'}</p>
               </div>
-              {activePodcast.spotifyUrl && (
-                <a href={activePodcast.spotifyUrl.replace('/embed/', '/').split('?')[0]}
+              {getSpotifyEmbedUrl(activePodcast) && (
+                <a href={getSpotifyEmbedUrl(activePodcast)!.replace('/embed/', '/').split('?')[0]}
                    target="_blank" rel="noopener noreferrer"
                    className="text-[9px] text-green/60 hover:text-green-400 transition-colors ml-3 flex-shrink-0 flex items-center gap-1">
                   Open in Spotify ↗
