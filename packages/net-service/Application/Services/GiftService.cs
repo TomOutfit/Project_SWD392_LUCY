@@ -56,27 +56,56 @@ public class GiftService(AppDbContext db) : IGiftService
         if (validationError != null) return validationError;
 
         var recipient = await db.Users.FindAsync(req.CreatorId);
-        if (recipient == null) return GiftResult.Fail("Creator not found", 404);
+        if (recipient != null)
+        {
+            if (sender.Id == recipient.Id)
+                return GiftResult.Fail("Cannot support yourself", 400);
 
-        if (sender.Id == recipient.Id)
-            return GiftResult.Fail("Cannot support yourself", 400);
+            if (sender.WalletBalance < req.Amount)
+                return GiftResult.Fail("Insufficient balance", 400);
 
+            await ExecuteTransferAsync(sender, recipient, req.Amount,
+                ("GiftSent", $"Support for '{req.PodcastTitle}' by {recipient.DisplayName}"),
+                ("GiftReceived", $"Support for '{req.PodcastTitle}' from {sender.DisplayName}"),
+                _ => new GiftTransaction
+                {
+                    SenderId = senderId,
+                    RecipientId = recipient.Id,
+                    RoomId = $"podcast:{req.PodcastId}",
+                    GiftType = "Support",
+                    Amount = req.Amount
+                });
+
+            return GiftResult.Ok(sender.WalletBalance, MapToDto(GetLastTransaction()));
+        }
+
+        // Support external/system creators that are not registered users in db.Users
         if (sender.WalletBalance < req.Amount)
             return GiftResult.Fail("Insufficient balance", 400);
 
-        await ExecuteTransferAsync(sender, recipient, req.Amount,
-            ("GiftSent", $"Support for '{req.PodcastTitle}' by {recipient.DisplayName}"),
-            ("GiftReceived", $"Support for '{req.PodcastTitle}' from {sender.DisplayName}"),
-            _ => new GiftTransaction
-            {
-                SenderId = senderId,
-                RecipientId = recipient.Id,
-                RoomId = $"podcast:{req.PodcastId}",
-                GiftType = "Support",
-                Amount = req.Amount
-            });
+        sender.WalletBalance -= req.Amount;
 
-        return GiftResult.Ok(sender.WalletBalance, MapToDto(GetLastTransaction()));
+        var txRecord = new GiftTransaction
+        {
+            SenderId = senderId,
+            RecipientId = req.CreatorId,
+            RoomId = $"podcast:{req.PodcastId}",
+            GiftType = "Support",
+            Amount = req.Amount
+        };
+        db.GiftTransactions.Add(txRecord);
+
+        db.WalletLedger.Add(new WalletLedger
+        {
+            UserId = sender.Id,
+            Amount = -req.Amount,
+            Type = "GiftSent",
+            Description = $"Support for '{req.PodcastTitle}'"
+        });
+
+        await db.SaveChangesAsync();
+
+        return GiftResult.Ok(sender.WalletBalance, MapToDto(txRecord));
     }
 
     // ── Get Transactions ────────────────────────────────────────────────────────
