@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 import AgoraRTC, { IAgoraRTCClient, ILocalAudioTrack } from 'agora-rtc-sdk-ng';
-import { api, roomsApi, podcastsApi } from '@/lib/api';
+import { roomsApi, podcastsApi, njsApi } from '@/lib/api';
 import { Room, Participant, ContentPin, LevelContent } from '@/types/index';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -852,7 +852,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       const formData = new FormData();
       formData.append('audio', blob, 'recording.webm');
 
-      const res = await api.post(`/podcasts/${podcastId}/upload`, formData, {
+      const res = await njsApi.post(`/api/podcasts/${podcastId}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
