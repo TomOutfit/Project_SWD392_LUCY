@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic2, Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle, Heart } from 'lucide-react';
+import { Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle, Heart, Search, Music, Headphones, Disc } from 'lucide-react';
 import { podcastsApi, walletApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Badge } from '@/components/ui/Badge';
@@ -14,6 +14,8 @@ import toast from 'react-hot-toast';
 export default function PodcastsPage() {
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('ALL');
   const { user } = useAuthStore();
   const navigate = useNavigate();
 
@@ -37,6 +39,17 @@ export default function PodcastsPage() {
   const [supportLoading, setSupportLoading] = useState(false);
 
   const SUPPORT_AMOUNTS = [5, 10, 25, 50];
+
+  const LANG_FILTERS = [
+    { id: 'ALL', label: 'All', flag: '🌐' },
+    { id: 'EN', label: 'English', flag: '🇺🇸' },
+    { id: 'JA', label: 'Japanese', flag: '🇯🇵' },
+    { id: 'ZH', label: 'Mandarin', flag: '🇨🇳' },
+    { id: 'ES', label: 'Spanish', flag: '🇪🇸' },
+    { id: 'FR', label: 'French', flag: '🇫🇷' },
+    { id: 'DE', label: 'German', flag: '🇩🇪' },
+    { id: 'KO', label: 'Korean', flag: '🇰🇷' },
+  ];
 
   useEffect(() => {
     if (user && user.role === 'LUCY') {
@@ -246,12 +259,22 @@ export default function PodcastsPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const filteredPodcasts = podcasts.filter(p => {
+    const matchesLang = selectedLanguage === 'ALL' || p.language === selectedLanguage;
+    const matchesQuery = !searchQuery.trim() ||
+      p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.creatorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.levelName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.roomName.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesLang && matchesQuery;
+  });
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 relative pb-32">
+    <div className="max-w-6xl mx-auto px-4 py-8 relative pb-36">
       <style>{`
         @keyframes bounce-bar {
           0%, 100% { height: 4px; }
-          50% { height: 18px; }
+          50% { height: 20px; }
         }
         .audio-bar-1 { animation: bounce-bar 0.7s ease-in-out infinite; }
         .audio-bar-2 { animation: bounce-bar 0.7s ease-in-out infinite 0.15s; }
@@ -272,147 +295,237 @@ export default function PodcastsPage() {
         }}
       />
 
-      <div className="absolute top-[10%] left-[-10%] w-[50%] h-[50%] bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.05),transparent_50%)] blur-[100px] pointer-events-none" />
+      <div className="absolute top-[5%] left-[-10%] w-[60%] h-[60%] bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.06),transparent_60%)] blur-[120px] pointer-events-none" />
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         {/* Header Block */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-6 border-b border-ghost/40">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 pb-6 border-b border-ghost/40">
           <div>
-            <div className="flex items-center gap-2">
-              <Mic2 className="w-6 h-6 text-cyan" />
-              <h1 className="font-orbitron font-black text-3xl text-[#F0F4FF] tracking-wider">Podcast Archives</h1>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan to-violet flex items-center justify-center shadow-lg shadow-cyan/20">
+                <Music className="w-5 h-5 text-void" />
+              </div>
+              <div>
+                <h1 className="font-orbitron font-black text-3xl text-[#F0F4FF] tracking-wider flex items-center gap-2">
+                  Spotify Podcast Hub
+                  <span className="text-xs font-mono font-normal text-cyan bg-cyan/10 border border-cyan/30 px-2 py-0.5 rounded-full">
+                    {podcasts.length} Shows
+                  </span>
+                </h1>
+                <p className="text-mist text-sm mt-0.5 font-inter">
+                  Curated language learning sessions, native podcasts & spoken masterclasses
+                </p>
+              </div>
             </div>
-            <p className="text-mist text-sm mt-1">Recorded educational content & speaking lobbies curated by Super hosts</p>
           </div>
           {user?.role === 'SUPER' && (
-            <Badge variant="magenta" className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold shadow-[0_0_10px_rgba(255,0,245,0.2)]">
+            <Badge variant="magenta" className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold shadow-[0_0_15px_rgba(255,0,245,0.25)] self-start md:self-auto">
               <Sparkles className="w-3.5 h-3.5 animate-spin" /> Super Host Privilege Active
             </Badge>
           )}
         </div>
 
+        {/* Search & Language Filters */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 mb-8">
+          {/* Search Bar */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-mist absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search podcasts, topics, hosts, or levels..."
+              className="w-full bg-navy/40 border border-ghost/60 rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#F0F4FF] placeholder:text-mist/50 outline-none focus:border-cyan/60 focus:bg-navy/60 transition-all shadow-inner"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-mist hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Language Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2 md:pb-0 scrollbar-none">
+            {LANG_FILTERS.map(f => (
+              <button
+                key={f.id}
+                onClick={() => setSelectedLanguage(f.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-exo font-bold transition-all flex items-center gap-1.5 flex-shrink-0 ${
+                  selectedLanguage === f.id
+                    ? 'bg-cyan text-void shadow-[0_0_15px_rgba(0,245,255,0.4)] scale-105'
+                    : 'bg-navy/40 border border-ghost/50 text-mist hover:text-white hover:border-cyan/40'
+                }`}
+              >
+                <span>{f.flag}</span>
+                <span>{f.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Podcast Grid */}
         {loading ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="card space-y-4 bg-navy/20">
-                <div className="h-36 skeleton rounded-xl bg-navy/30" />
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="card space-y-4 bg-navy/20 p-4 rounded-2xl border border-ghost/30">
+                <div className="aspect-square skeleton rounded-xl bg-navy/40" />
                 <div className="h-4 skeleton w-3/4 rounded" />
                 <div className="h-3 skeleton w-1/2 rounded" />
               </div>
             ))}
           </div>
-        ) : podcasts.length === 0 ? (
+        ) : filteredPodcasts.length === 0 ? (
           <div className="text-center py-20 glass rounded-2xl border border-ghost/40 max-w-md mx-auto">
-            <Mic2 className="w-16 h-16 text-ghost/50 mx-auto mb-4" />
-            <h3 className="font-orbitron font-bold text-xl text-[#F0F4FF] mb-2">No Podcasts Recorded</h3>
-            <p className="text-sm text-mist">Lobbies hosted by Super members will appear here once saved.</p>
+            <Headphones className="w-16 h-16 text-ghost/50 mx-auto mb-4 animate-bounce" />
+            <h3 className="font-orbitron font-bold text-xl text-[#F0F4FF] mb-2">No Podcasts Found</h3>
+            <p className="text-sm text-mist">Try adjusting your search query or language filter.</p>
           </div>
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {podcasts.map((podcast, i) => {
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredPodcasts.map((podcast, i) => {
               const isActive = activePodcast?.id === podcast.id;
               return (
                 <motion.div
                   key={podcast.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
+                  transition={{ delay: i * 0.03 }}
                   onClick={() => handlePlayPodcast(podcast)}
-                  className={`card group cursor-pointer border hover:scale-[1.02] transition-all duration-300 ${
+                  className={`card group cursor-pointer border rounded-2xl p-3.5 transition-all duration-300 flex flex-col justify-between ${
                     isActive
-                      ? 'border-cyan bg-cyan/5 shadow-[0_0_20px_rgba(0,245,255,0.15)]'
-                      : 'border-ghost/50 hover:border-cyan/30 bg-navy/30'
+                      ? 'border-cyan bg-cyan/10 shadow-[0_0_25px_rgba(0,245,255,0.2)]'
+                      : 'border-ghost/40 hover:border-cyan/40 bg-[#0E0F26]/60 hover:bg-[#121435]/90'
                   }`}
                 >
-                  <div className="relative h-36 rounded-xl bg-gradient-to-br from-violet/20 to-cyan/20 mb-4 overflow-hidden shadow-inner">
-                    {/* Missing audio indicator */}
-                    {(!podcast.fileUrl) && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-void/70 z-10" title="Audio not yet uploaded">
-                        <AlertCircle className="w-5 h-5 text-amber" />
-                        <span className="text-[10px] text-amber font-exo font-bold uppercase tracking-wider">No Audio</span>
+                  <div>
+                    {/* Spotify Cover Artwork */}
+                    <div className="relative aspect-square rounded-xl overflow-hidden mb-3.5 shadow-lg group-hover:shadow-[0_8px_25px_rgba(0,245,255,0.2)] transition-all duration-300 bg-gradient-to-br from-violet/20 to-cyan/20">
+                      {podcast.coverUrl ? (
+                        <img
+                          src={podcast.coverUrl}
+                          alt={podcast.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : null}
+
+                      {/* Dark Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-void/90 via-void/20 to-transparent opacity-75 group-hover:opacity-50 transition-opacity" />
+
+                      {/* Missing audio indicator */}
+                      {!podcast.fileUrl && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-void/80 z-10">
+                          <AlertCircle className="w-6 h-6 text-amber" />
+                          <span className="text-[10px] text-amber font-exo font-bold uppercase tracking-wider">No Audio</span>
+                        </div>
+                      )}
+
+                      {/* Spotify-style Green/Cyan Floating Play Button */}
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className={`w-13 h-13 rounded-full bg-cyan text-void flex items-center justify-center shadow-[0_0_20px_rgba(0,245,255,0.6)] transition-all duration-300 ${
+                          isActive
+                            ? 'opacity-100 scale-105'
+                            : 'opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100'
+                        }`}>
+                          {isActive && isPlaying ? (
+                            <Pause className="w-6 h-6 fill-current text-void" />
+                          ) : (
+                            <Play className="w-6 h-6 fill-current text-void ml-1" />
+                          )}
+                        </div>
                       </div>
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-void/25 group-hover:bg-void/40 transition-colors duration-300">
-                      <div className={`w-14 h-14 rounded-full glass border flex items-center justify-center shadow-lg transition-transform duration-300 ${
-                        isActive ? 'border-cyan scale-105' : 'border-ghost/60 group-hover:scale-110'
-                      }`}>
-                        {isActive && isPlaying ? (
-                          <Pause className="w-6 h-6 text-cyan fill-current" />
-                        ) : (
-                          <Play className="w-6 h-6 text-cyan ml-1 fill-current" />
+
+                      {/* Playing Equalizer Animation */}
+                      {isActive && isPlaying && (
+                        <div className="absolute bottom-2.5 left-2.5 flex items-end gap-1 h-6 bg-void/80 backdrop-blur-md px-2 py-1 rounded-lg border border-cyan/40">
+                          <span className="w-1 bg-cyan rounded-full audio-bar-1" />
+                          <span className="w-1 bg-cyan rounded-full audio-bar-2" />
+                          <span className="w-1 bg-cyan rounded-full audio-bar-3" />
+                          <span className="w-1 bg-cyan rounded-full audio-bar-4" />
+                        </div>
+                      )}
+
+                      {/* Language Flag Badge Top-Left */}
+                      <div className="absolute top-2.5 left-2.5">
+                        <Badge variant="cyan" className="text-[10px] font-bold py-0.5 px-2 backdrop-blur-md bg-void/80 border border-cyan/30">
+                          {LANG_FLAGS[podcast.language]} {podcast.language}
+                        </Badge>
+                      </div>
+
+                      {/* Duration Badge Bottom-Right */}
+                      <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1 bg-void/80 backdrop-blur-md rounded-md px-2 py-0.5 border border-ghost/40">
+                        <Clock className="w-3 h-3 text-cyan" />
+                        <span className="text-[10px] text-white font-mono font-bold">{formatDuration(podcast.durationSec)}</span>
+                      </div>
+                    </div>
+
+                    {/* Title */}
+                    {editingPodcastId === podcast.id ? (
+                      <div className="flex items-center gap-1.5 mb-2" onClick={e => e.stopPropagation()}>
+                        <input
+                          ref={titleInputRef}
+                          value={editingTitle}
+                          onChange={e => setEditingTitle(e.target.value)}
+                          onKeyDown={e => handleTitleKeyDown(podcast.id, e)}
+                          className="flex-1 bg-navy border border-cyan/50 rounded px-2 py-0.5 text-xs font-exo font-bold text-cyan outline-none min-w-0"
+                          maxLength={120}
+                        />
+                        <button onClick={() => saveTitle(podcast.id)} className="text-emerald-400 hover:text-emerald-300 flex-shrink-0">
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-1.5 group/title mb-1.5">
+                        <h3 className={`font-exo font-bold text-sm line-clamp-2 leading-snug transition-colors flex-1 ${
+                          isActive ? 'text-cyan' : 'text-[#F0F4FF] group-hover/title:text-cyan'
+                        }`}>
+                          {podcast.title}
+                        </h3>
+                        {user?.role === 'SUPER' && (
+                          <button
+                            onClick={(e) => startEditingTitle(podcast, e)}
+                            className="opacity-0 group-hover/title:opacity-100 text-mist hover:text-cyan transition-all flex-shrink-0 mt-0.5"
+                            title="Edit title"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
-                    </div>
-                    {isActive && isPlaying && (
-                      <div className="absolute bottom-2 left-3 flex items-end gap-0.5 h-6">
-                        <span className="w-1 bg-cyan rounded-full audio-bar-1" />
-                        <span className="w-1 bg-cyan rounded-full audio-bar-2" />
-                        <span className="w-1 bg-cyan rounded-full audio-bar-3" />
-                        <span className="w-1 bg-cyan rounded-full audio-bar-4" />
-                      </div>
                     )}
-                    <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-void/70 rounded px-2.5 py-1 border border-ghost/40">
-                      <Clock className="w-3.5 h-3.5 text-white/80" />
-                      <span className="text-[11px] text-white/80 font-mono font-bold">{formatDuration(podcast.durationSec)}</span>
-                    </div>
-                    <div className="absolute top-2 left-2">
-                      <Badge variant="cyan" className="text-[10px] font-bold py-0.5 px-2">
-                        {LANG_FLAGS[podcast.language]} {podcast.language}
-                      </Badge>
-                    </div>
+
+                    <p className="text-[11px] text-mist mb-3 font-inter truncate">
+                      By <strong className="text-violet font-semibold">{podcast.creatorName}</strong>
+                    </p>
                   </div>
 
-                  {editingPodcastId === podcast.id ? (
-                    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                      <input
-                        ref={titleInputRef}
-                        value={editingTitle}
-                        onChange={e => setEditingTitle(e.target.value)}
-                        onKeyDown={e => handleTitleKeyDown(podcast.id, e)}
-                        className="flex-1 bg-navy border border-cyan/50 rounded px-2 py-0.5 text-xs font-exo font-bold text-cyan outline-none min-w-0"
-                        maxLength={120}
-                      />
-                      <button onClick={() => saveTitle(podcast.id)} className="text-emerald-400 hover:text-emerald-300 flex-shrink-0">
-                        <Check className="w-3.5 h-3.5" />
+                  <div>
+                    {/* Level Tag */}
+                    <div className="mb-3">
+                      <span className="text-[10px] font-mono text-cyan/90 bg-cyan/10 px-2 py-0.5 rounded border border-cyan/20 truncate block">
+                        {podcast.levelName}
+                      </span>
+                    </div>
+
+                    {/* Support Creator — hidden for self */}
+                    {user && user.id !== podcast.creatorId && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSupportModal({ podcast, creatorName: podcast.creatorName }); }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1 rounded-lg bg-pink-500/10 border border-pink-500/30 hover:bg-pink-500/25 hover:border-pink-500/60 text-pink-400 hover:text-pink-300 text-[11px] font-exo font-bold transition-all mb-2.5"
+                      >
+                        <Heart className="w-3 h-3 fill-current" />
+                        Support Creator
                       </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 group/title">
-                      <h3 className={`font-exo font-bold text-base mb-1 line-clamp-2 leading-snug transition-colors flex-1 ${
-                        isActive ? 'text-cyan' : 'text-[#F0F4FF] group-hover/title:text-cyan'
-                      }`}>
-                        {podcast.title}
-                      </h3>
-                      {user?.role === 'SUPER' && (
-                        <button
-                          onClick={(e) => startEditingTitle(podcast, e)}
-                          className="opacity-0 group-hover/title:opacity-100 text-mist hover:text-cyan transition-all flex-shrink-0"
-                          title="Edit title"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  <p className="text-xs text-mist mb-3 font-inter">
-                    Hosted by <strong className="text-violet font-semibold">{podcast.creatorName}</strong> • {podcast.levelName}
-                  </p>
+                    )}
 
-                  {/* Support Creator — hidden for self */}
-                  {user && user.id !== podcast.creatorId && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSupportModal({ podcast, creatorName: podcast.creatorName }); }}
-                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/30 hover:bg-pink-500/25 hover:border-pink-500/60 text-pink-400 hover:text-pink-300 text-xs font-exo font-bold transition-all mb-3"
-                    >
-                      <Heart className="w-3.5 h-3.5 fill-current" />
-                      Support this Super
-                    </button>
-                  )}
-
-                  <div className="flex items-center justify-between pt-3 border-t border-ghost/40 text-xs text-mist font-mono">
-                    <span>{podcast.listenCount} listens</span>
-                    <span>{new Date(podcast.createdAt).toLocaleDateString()}</span>
+                    <div className="flex items-center justify-between pt-2.5 border-t border-ghost/30 text-[10px] text-mist font-mono">
+                      <span className="flex items-center gap-1">
+                        <Headphones className="w-3 h-3 text-mist/70" />
+                        {podcast.listenCount}
+                      </span>
+                      <span>{new Date(podcast.createdAt).toLocaleDateString()}</span>
+                    </div>
                   </div>
                 </motion.div>
               );
@@ -421,7 +534,7 @@ export default function PodcastsPage() {
         )}
       </motion.div>
 
-      {/* Floating Audio Player Control Panel */}
+      {/* Spotify Floating Audio Player Bar */}
       <AnimatePresence>
         {activePodcast && (
           <motion.div
@@ -429,27 +542,38 @@ export default function PodcastsPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
             transition={{ type: 'spring', damping: 20 }}
-            className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:w-[680px] md:-translate-x-1/2 z-50 rounded-2xl glass border border-cyan/40 bg-[#0C0C1E]/95 shadow-[0_10px_30px_rgba(0,245,255,0.15)] p-4 flex flex-col md:flex-row items-center gap-4"
+            className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:w-[720px] md:-translate-x-1/2 z-50 rounded-2xl glass border border-cyan/40 bg-[#0A0B1B]/95 shadow-[0_10px_35px_rgba(0,245,255,0.2)] p-3.5 flex flex-col md:flex-row items-center gap-4"
           >
-            {/* Title & Info */}
-            <div className="flex items-center gap-3 w-full md:w-auto md:min-w-[180px] md:max-w-[220px]">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan/30 to-violet/30 flex items-center justify-center relative flex-shrink-0">
-                <Radio className={`w-5 h-5 text-cyan ${isPlaying ? 'animate-pulse' : ''}`} />
+            {/* Cover Art Thumbnail & Info */}
+            <div className="flex items-center gap-3 w-full md:w-auto md:min-w-[200px] md:max-w-[240px]">
+              <div className="w-12 h-12 rounded-xl overflow-hidden relative flex-shrink-0 bg-navy/60 border border-cyan/30 shadow-md">
+                {activePodcast.coverUrl ? (
+                  <img src={activePodcast.coverUrl} alt="" className={`w-full h-full object-cover ${isPlaying ? 'scale-105' : ''} transition-transform`} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-cyan/30 to-violet/30">
+                    <Disc className={`w-6 h-6 text-cyan ${isPlaying ? 'animate-spin' : ''}`} />
+                  </div>
+                )}
+                {isPlaying && (
+                  <div className="absolute inset-0 bg-void/30 flex items-center justify-center">
+                    <Radio className="w-5 h-5 text-cyan animate-pulse" />
+                  </div>
+                )}
               </div>
               <div className="overflow-hidden">
                 <h4 className="text-xs font-exo font-bold text-[#F0F4FF] truncate leading-tight">{activePodcast.title}</h4>
-                <p className="text-[10px] text-mist truncate">By {activePodcast.creatorName}</p>
+                <p className="text-[10px] text-mist truncate mt-0.5">By {activePodcast.creatorName}</p>
               </div>
             </div>
 
-            {/* Play controls and progress */}
+            {/* Play controls & Seek Progress */}
             <div className="flex-1 flex flex-col gap-1.5 w-full">
               <div className="flex items-center justify-center gap-3">
                 <button
                   onClick={togglePlayPause}
-                  className="w-8 h-8 rounded-full bg-cyan text-void hover:bg-cyan-300 active:scale-95 transition-all flex items-center justify-center"
+                  className="w-9 h-9 rounded-full bg-cyan text-void hover:bg-cyan-300 active:scale-95 transition-all flex items-center justify-center shadow-[0_0_15px_rgba(0,245,255,0.5)]"
                 >
-                  {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                  {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
                 </button>
               </div>
 
@@ -470,7 +594,7 @@ export default function PodcastsPage() {
             </div>
 
             {/* Volume controls & close */}
-            <div className="flex items-center justify-between w-full md:w-auto gap-4 border-t md:border-t-0 pt-2 md:pt-0 border-ghost/40">
+            <div className="flex items-center justify-between w-full md:w-auto gap-3 border-t md:border-t-0 pt-2 md:pt-0 border-ghost/40">
               <div className="flex items-center gap-2">
                 <button onClick={toggleMute} className="text-mist hover:text-cyan transition-colors">
                   {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}

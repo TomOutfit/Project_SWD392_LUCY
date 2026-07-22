@@ -36,6 +36,7 @@ export const podcasts = sqliteTable('podcasts', {
   title: text('title').notNull(),
   durationSec: integer('duration_sec').notNull(),
   fileUrl: text('file_url').notNull(),
+  coverUrl: text('cover_url'),
   language: text('language').notNull(),
   levelName: text('level_name').notNull(),
   createdAt: text('created_at').notNull(),

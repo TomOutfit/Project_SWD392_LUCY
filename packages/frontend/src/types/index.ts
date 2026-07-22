@@ -83,6 +83,7 @@ export interface Podcast {
   title: string;
   durationSec: number;
   fileUrl: string;
+  coverUrl?: string;
   language: Language;
   levelName: string;
   createdAt: string;
