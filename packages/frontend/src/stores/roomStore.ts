@@ -90,6 +90,7 @@ interface RoomState {
 
   latencyMs: number | null;
   pingInterval: ReturnType<typeof setInterval> | null;
+  volumeMonitorInterval: ReturnType<typeof setInterval> | null;
 
   knockStatus: 'none' | 'knocking' | 'approved' | 'denied';
   knockRequests: { socketId: string; user: { id: number; name: string; personaId: number; role: string } }[];
@@ -133,6 +134,8 @@ interface RoomActions {
   getLocalVolumeLevel: () => number;
   measureLatency: () => void;
   pingUser: (targetUserId: number) => void;
+  startVolumeMonitor: () => void;
+  stopVolumeMonitor: () => void;
   kickUser: (participantId: number) => void;
   approveKnock: (roomId: string, targetSocketId: string) => void;
   denyKnock: (roomId: string, targetSocketId: string) => void;
@@ -183,6 +186,7 @@ const initialState: RoomState = {
 
   latencyMs: null,
   pingInterval: null,
+  volumeMonitorInterval: null,
 
   knockStatus: 'none',
   knockRequests: [],
@@ -459,17 +463,25 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
 
     on('recording-stopped', (_data: any) => {
-      const { recordingInterval } = get();
+      const { recordingInterval, currentPodcastId, recordedChunks } = get();
 
       if (recordingInterval) clearInterval(recordingInterval);
 
-      // Reset UI state immediately, but DO NOT clear currentPodcastId here —
-      // the MediaRecorder's final `ondataavailable` fires asynchronously after stop().
-      // We need podcastId to still be in state when that event arrives.
+      // The server creates the podcast record (with fileUrl='') when stop-recording was received,
+      // and emits recording-stopped with the new podcastId. Use it to upload chunks now.
+      const podcastId = _data?.podcastId ?? currentPodcastId;
+
+      if (podcastId && recordedChunks.length > 0) {
+        const chunksToUpload = [...recordedChunks];
+        set({ recordedChunks: [] });
+        get().uploadRecording(podcastId, chunksToUpload);
+      }
+
       set({
         isRecording: false,
         recordingTime: 0,
         recordingInterval: null,
+        mediaRecorder: null,
       });
     });
 
@@ -927,11 +939,13 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
         // MediaRecorder fires one final ondataavailable after stop() with the remaining buffer.
-        // Wait until recorder is inactive to ensure we have ALL chunks before uploading.
+        // The recording-stopped handler (triggered by server event) does the upload.
+        // This ondataavailable serves as a safety net if MediaRecorder delivers chunks
+        // before the server response arrives (pid would be set from the state at that point).
         if (recorder.state === 'inactive' && chunks.length > 0) {
           const finalChunks = [...chunks];
           chunks.length = 0;
-          const { currentPodcastId: pid } = get();
+          const pid = get().currentPodcastId;
           if (pid) get().uploadRecording(pid, finalChunks);
         }
       };
@@ -965,29 +979,41 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
     if (recordingInterval) clearInterval(recordingInterval);
 
-    // Store socket/room before clearing state
+    // Store references before clearing state
     const roomId = currentRoom?.id ?? null;
     const socketRef = socket;
+    const recorder = mediaRecorder;
+    const podcastId = get().currentPodcastId;
+    const chunksRef = [...get().recordedChunks];
 
     set({
       isRecording: false,
       recordingTime: 0,
       mediaRecorder: null,
       recordingInterval: null,
+      // DO NOT clear currentPodcastId here — let the recording-stopped handler
+      // do it after upload completes. This ensures ondataavailable can still fire
+      // if the browser delivers a final chunk after stop().
     });
 
-    // Stop the recorder — fires ondataavailable (final chunk) then onstop.
-    // Upload is triggered by ondataavailable when recorder becomes inactive.
-    // We emit stop-recording AFTER stop() so the server durationSec matches
-    // the actual recording window, not a moment before the recorder fully stops.
-    mediaRecorder.stop();
+    // Stop the recorder
+    recorder.stop();
 
-    // Emit to server only after stop() so durationSec is accurate.
-    // (The upload will follow asynchronously via ondataavailable → uploadRecording.)
+    // Emit to server — server will create podcast record and emit recording-stopped
+    // back to us (with podcastId). The recording-stopped handler will then upload chunks.
     if (socketRef && roomId) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (socketRef as any).emit('stop-recording', { roomId });
     }
+
+    // Fallback: if recording-stopped event hasn't fired within 5 seconds and we have chunks,
+    // force upload now. This guards against rare cases where socket event is missed.
+    setTimeout(() => {
+      const state = get();
+      if (state.currentPodcastId && chunksRef.length > 0) {
+        get().uploadRecording(state.currentPodcastId, chunksRef);
+      }
+    }, 5000);
   },
 
   // ── Agora ────────────────────────────────────────────────────────────────────
@@ -1091,6 +1117,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         agoraJoining: false,
       });
 
+      // Start volume monitoring so isSpeaking reflects actual audio level
+      get().startVolumeMonitor();
+
       // Start language detection so speaking time is only counted
       // when the user speaks in the room's target language
       get().startLanguageDetection();
@@ -1105,6 +1134,8 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
   async leaveAgoraChannel() {
     const { agoraClient, localAudioTrack, audioContext } = get();
+
+    get().stopVolumeMonitor();
 
     if (agoraClient) {
       if (localAudioTrack) {
@@ -1129,6 +1160,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       audioContext: null,
       analyserNode: null,
       monitoringGain: null,
+      isSpeaking: false,
     });
   },
 
@@ -1149,6 +1181,8 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       const source = audioContext.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
       const gainNode = audioContext.createGain();
       gainNode.gain.value = isSelfMonitoring ? 1 : 0;
+
+      // Mirror the joinAgoraChannel routing: source → analyser (for volume reading) → gainNode (for self-monitoring) → destination
       source.connect(analyserNode);
       analyserNode.connect(gainNode);
       gainNode.connect(audioContext.destination);
@@ -1202,6 +1236,44 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     console.log('[getLocalVolumeLevel] freqAvg:', freqAvg.toFixed(1), '| timeRMS:', rms.toFixed(4), 'maxDev:', max, '→', result.toFixed(1));
 
     return result;
+  },
+
+  // ── Volume Monitor ───────────────────────────────────────────────────────────
+
+  startVolumeMonitor() {
+    const { volumeMonitorInterval } = get();
+    if (volumeMonitorInterval) return;
+
+    const SPEAKING_THRESHOLD = 5; // volume level above which user is considered "speaking"
+
+    const interval = setInterval(() => {
+      const { analyserNode, isMuted, audioContext } = get();
+      if (!analyserNode || !audioContext) return;
+
+      // Keep AudioContext alive — browser may suspend it during tab inactivity.
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+        return;
+      }
+
+      const volume = get().getLocalVolumeLevel();
+      const currentlySpeaking = !isMuted && volume > SPEAKING_THRESHOLD;
+
+      const { isSpeaking } = get();
+      if (isSpeaking !== currentlySpeaking) {
+        set({ isSpeaking: currentlySpeaking });
+      }
+    }, 150); // poll every 150ms for responsive speaking detection
+
+    set({ volumeMonitorInterval: interval });
+  },
+
+  stopVolumeMonitor() {
+    const { volumeMonitorInterval } = get();
+    if (volumeMonitorInterval) {
+      clearInterval(volumeMonitorInterval);
+      set({ volumeMonitorInterval: null });
+    }
   },
 
   // ── Latency ─────────────────────────────────────────────────────────────────
