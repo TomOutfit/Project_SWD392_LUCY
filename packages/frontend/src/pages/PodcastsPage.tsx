@@ -1,8 +1,7 @@
 // src/pages/PodcastsPage.tsx
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle, Heart, Search, Music, Headphones, Disc } from 'lucide-react';
+import { Play, Pause, Clock, Sparkles, Volume2, VolumeX, X, Radio, Pencil, Check, AlertCircle, Heart, Search, Music, Headphones, Disc, ShieldCheck, Unlock } from 'lucide-react';
 import { podcastsApi, walletApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Badge } from '@/components/ui/Badge';
@@ -17,7 +16,6 @@ export default function PodcastsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('ALL');
   const { user } = useAuthStore();
-  const navigate = useNavigate();
 
   // Audio player state
   const [activePodcast, setActivePodcast] = useState<Podcast | null>(null);
@@ -51,12 +49,7 @@ export default function PodcastsPage() {
     { id: 'KO', label: 'Korean', flag: '🇰🇷' },
   ];
 
-  useEffect(() => {
-    if (user && user.role === 'LUCY') {
-      navigate('/');
-      return;
-    }
-  }, [user, navigate]);
+// All users (Free learners, PRO, and SUPER) are allowed to listen and learn freely!
 
   useEffect(() => {
     podcastsApi.all()
@@ -299,7 +292,7 @@ export default function PodcastsPage() {
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         {/* Header Block */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 pb-6 border-b border-ghost/40">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-6 border-b border-ghost/40">
           <div>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan to-violet flex items-center justify-center shadow-lg shadow-cyan/20">
@@ -321,6 +314,35 @@ export default function PodcastsPage() {
           {user?.role === 'SUPER' && (
             <Badge variant="magenta" className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold shadow-[0_0_15px_rgba(255,0,245,0.25)] self-start md:self-auto">
               <Sparkles className="w-3.5 h-3.5 animate-spin" /> Super Host Privilege Active
+            </Badge>
+          )}
+        </div>
+
+        {/* Verified Authority & Open Education Banner */}
+        <div className="mb-8 p-4 rounded-2xl glass border border-cyan/30 bg-gradient-to-r from-cyan/10 via-violet/10 to-transparent flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-cyan/20 border border-cyan/40 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <ShieldCheck className="w-5 h-5 text-cyan" />
+            </div>
+            <div>
+              <h3 className="font-exo font-bold text-sm text-[#F0F4FF] flex items-center gap-2">
+                Verified Quality & Open Community Access
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-400/10 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-bold">
+                  100% Free Listening
+                </span>
+              </h3>
+              <p className="text-xs text-mist mt-0.5 font-inter leading-relaxed">
+                Recording & publishing privileges are curated exclusively by <strong>Verified Super Hosts</strong> to guarantee academic excellence & authority. Listening and learning are 100% open for all community members.
+              </p>
+            </div>
+          </div>
+          {user?.role === 'SUPER' ? (
+            <Badge variant="magenta" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold flex-shrink-0">
+              <Sparkles className="w-3.5 h-3.5" /> Creator Mode
+            </Badge>
+          ) : (
+            <Badge variant="cyan" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold flex-shrink-0">
+              <Unlock className="w-3.5 h-3.5 text-cyan" /> Open Listener Mode
             </Badge>
           )}
         </div>
