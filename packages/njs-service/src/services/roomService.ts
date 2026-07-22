@@ -355,6 +355,20 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     const now = new Date().toISOString();
     const closedAt = now;
 
+    // Credit ALL remaining pending seconds as validated when room closes.
+    // This ensures speaking time is never silently discarded at end-of-session
+    // even when the Web Speech API hasn't reported a language match yet.
+    const roomLangPrefix = { EN: 'en', ZH: 'zh', JA: 'ja' }[room.language] ?? '';
+    for (const p of room.participants) {
+      const pending = roomData.pendingCountdown.get(p.oderId) ?? 0;
+      if (pending > 0) {
+        p.activeSpeakingTimeSec = (p.activeSpeakingTimeSec ?? 0) + pending;
+        // Treat pending seconds as validated at session end (all users are good-faith speakers)
+        p.validatedSpeakingTimeSec = (p.validatedSpeakingTimeSec ?? 0) + pending;
+        console.log(`[roomService] close-room: credited ${pending} pending validated seconds for user ${p.oderId}`);
+      }
+    }
+
     // Compute total session duration
     const createdAt = room.createdAt ?? now;
     const totalDurationSec = Math.max(0,
@@ -560,6 +574,17 @@ function handleLeaveRoom(io: Server, socket: Socket, roomId: string) {
         socket.data.currentRoom = undefined;
         return;
       }
+    }
+  }
+
+  // Credit pending validated seconds before removing participant from room state
+  const participant = roomData.room.participants.find(p => p.oderId === oderId);
+  if (participant) {
+    const pending = roomData.pendingCountdown.get(oderId) ?? 0;
+    if (pending > 0) {
+      participant.activeSpeakingTimeSec = (participant.activeSpeakingTimeSec ?? 0) + pending;
+      participant.validatedSpeakingTimeSec = (participant.validatedSpeakingTimeSec ?? 0) + pending;
+      console.log(`[roomService] leave-room: credited ${pending} pending validated seconds for user ${oderId}`);
     }
   }
 
