@@ -208,11 +208,14 @@ export default function PodcastsPage() {
   };
 
   const handlePlayPodcast = async (podcast: Podcast) => {
-    const { url: embedUrl } = getEmbedUrl(podcast);
+    const { url: embedUrl, type: embedType } = getEmbedUrl(podcast);
     if (!embedUrl && !podcast.fileUrl) {
       toast.error('No audio recording available for this podcast');
       return;
     }
+
+    // Set embedType BEFORE any play/pause logic
+    setEmbedType(embedType);
 
     if (activePodcast?.id === podcast.id) {
       togglePlayPause();
@@ -224,7 +227,6 @@ export default function PodcastsPage() {
     setCurrentTime(0);
     setAudioError(null);
     setShowSpotifyPlayer(false);
-    setEmbedType(getEmbedUrl(podcast).type);
     setDuration(podcast.durationSec || 0);
 
     // Call API to register list count increment
