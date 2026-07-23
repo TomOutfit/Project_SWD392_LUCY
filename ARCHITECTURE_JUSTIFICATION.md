@@ -16,7 +16,7 @@ graph TD
     
     subgraph "Microservices Cluster"
         Gateway -->|/api/v1/*, /api/auth, /api/wallet, /api/xp| NET[.NET 9 Financial & Auth Microservice\n- Financial Ledger & Transactions\n- Auth JWT & User Profiles\n- XP & Leveling Engine]
-        Gateway -->|/api/rooms, /api/podcasts, /socket.io/*| NJS[Node.js Real-time Audio & Content Microservice\n- Real-time Socket.IO Engine\n- Agora RTC Signaling & Observer\n- Audio File Upload & Streaming]
+        Gateway -->|/api/rooms, /api/podcasts, /socket.io/*, /uploads/*| NJS[Node.js Real-time Audio & Content Microservice\n- Real-time Socket.IO Engine\n- Agora RTC Signaling & Observer\n- Audio File Upload & Streaming]
     end
 
     subgraph "Real-Time Media Infrastructure"
@@ -52,38 +52,62 @@ graph TD
 
 ---
 
-### 2.2. Kiến trúc Xử lý Thời gian thực (Real-Time System Architecture)
+### 2.2. Kiến trúc Xử lý Thời gian thực & Tối ưu hóa Audio (Real-Time & Audio Streaming Architecture)
 
-Hệ thống LUCY sử dụng **Mô hình Thời gian thực hai kênh (Dual-Channel Real-Time Pattern)**:
+Hệ thống LUCY sử dụng **Mô hình Thời gian thực hai kênh (Dual-Channel Real-Time Pattern)** nhằm đảm bảo độ trễ tối thiểu và tránh hiện tượng giật lag âm thanh:
 
-1. **Kênh Điều khiển Trạng thái (Signaling Channel via Socket.IO WebSocket)**:
-   - Truyền tải tất cả các sự kiện thay đổi trạng thái trong phòng học với độ trễ **< 20ms**:
-     - `join-room`, `leave-room`: Người dùng ra/vào phòng.
-     - `hand-raise`, `grant-speak`: Giơ tay xin phát biểu & cấp quyền nói.
-     - `audio-bar-visualizer`: Nhịp sóng âm thanh thời gian thực.
-     - `recording-stopped`: Báo dừng và phát hành Podcast.
-     - `xp-earned-batch`: Đẩy bảng thưởng XP tức thì cho cả phòng khi kết thúc buổi học.
+1. **Kênh Giao tiếp Thời gian thực (Signaling Channel - Socket.IO WebSocket)**:
+   - Truyền tải các gói tin JSON siêu nhẹ để cập nhật trạng thái phòng học (giơ tay `hand-raise`, duyệt phát biểu `grant-speak`, bật tắt mic) với độ trễ **< 20ms**. 
+   - Node.js không cần gánh dữ liệu media, giúp server nhẹ và hoạt động ổn định.
 
-2. **Kênh Truyền âm thanh Thoại Đa chiều (Media Channel via Agora WebRTC SFU)**:
-   - Luồng tiếng thoại (Voice Stream) của người nói được nén qua Codec Opus và truyền qua mạng **Selective Forwarding Unit (SFU)** của Agora Cloud với độ trễ âm thanh **< 150ms**.
-   - Thiết kế này giúp Server Node.js của LUCY không phải gánh nặng băng thông nén/phát âm thanh trực tiếp, giữ cho server luôn nhẹ và ổn định.
+2. **Kênh Âm thanh thoại Đa chiều (Media Channel - Agora WebRTC SFU)**:
+   - Luồng giọng nói đi trực tiếp từ trình duyệt Client đến hạ tầng đám mây phân tán **Agora WebRTC** theo kiến trúc **SFU (Selective Forwarding Unit)** với độ trễ **< 150ms**.
+   - Tránh hoàn toàn hiện tượng nghẽn cổ chai CPU/băng thông trên server Node.js.
+
+3. **Kênh Phát bài giảng tĩnh (Podcast Static Streaming via HTTP Range Requests - Partial Content 206)**:
+   - Thay vì bắt học viên tải toàn bộ file bài giảng (`.wav` / `.mp3`) về bộ nhớ trước khi phát, hệ thống cấu hình Express static & Nginx hỗ trợ **Range Requests**.
+   - Client gửi header `Range: bytes=...`, server phản hồi mã **`HTTP 206 Partial Content`** trả về đúng phân đoạn dữ liệu cần phát.
+   - Nhờ vậy, học viên có thể **tua bài giảng (seeking) ngay lập tức** mà không có độ trễ buffering và không tốn RAM hệ thống.
 
 ---
 
-### 2.3. Các Design Pattern bổ trợ trong Dự án
+### 2.3. So sánh và Lựa chọn Hệ quản trị Cơ sở Dữ liệu (Database Design & Decision Matrix)
 
-| Phân hệ / Tính năng | Mẫu Thiết kế (Design Pattern) | Mô tả & Lợi ích mang lại |
+Hệ thống sử dụng mô hình **Database per Service (Mỗi dịch vụ một Cơ sở Dữ liệu riêng biệt)** nhằm giảm tải và loại bỏ ràng buộc chéo (Tightly-coupled Schema):
+
+| Đặc trưng | `.NET Service Database` (SQLite / SQL Server) | `Node.js Service Database` (SQLite / Drizzle ORM) |
 | :--- | :--- | :--- |
-| **Giao dịch tài chính** | **Double-Entry Ledger Pattern** | Mọi nạp/gửi quà/donate đều tạo 2 dòng ghi nợ/có đối ứng (`WalletLedger` & `GiftTransaction`), đảm bảo kiểm toán 100% dòng tiền. |
-| **Vòng đời Phòng học** | **Finite State Machine (FSM)** | Phòng học chuyển đổi nghiêm ngặt `Lobby` $\rightarrow$ `Topic` $\rightarrow$ `Transition` $\rightarrow$ `Closed`, triệt tiêu hoàn toàn trạng thái sai luồng. |
-| **Quản lý State Frontend**| **Atomic Store Pattern (Zustand)** | Quản lý state tập trung, tối ưu render và kết nối trực tiếp với Socket WebSocket ngoài vòng đời React Component. |
-| **Kiểm soát Cấp độ** | **Policy-Based Level Guard** | Tính toán level động $\text{UserLevel} = \left\lfloor\frac{\text{XP}}{50}\right\rfloor + 1$ và chặn tự động người dùng vào phòng quá khó (`LevelId > UserLevel + 3`). |
+| **Vai trò chính** | Quản lý Tài khoản (Users), Ví tiền (Wallet), Nhật ký giao dịch (Ledger Transactions). | Quản lý Phòng học (Rooms), Danh sách Podcast, Thông tin Cấp độ (Levels), Session học tập. |
+| **Yêu cầu kỹ thuật** | **ACID chặt chẽ (Strong Consistency)**. Tuyệt đối không để xảy ra sai sót số dư. | **Tốc độ đọc/ghi nhanh (High Write-Throughput)** để phục vụ cập nhật trạng thái phòng học thời gian thực. |
+| **Công nghệ truy cập** | Entity Framework Core (EF Core) | Drizzle ORM (TypeScript-first SQL Query Builder) |
+| **Thiết kế tối ưu** | Sử dụng Ràng buộc Khóa ngoại chặt chẽ, Transactions cô lập cao. | Sử dụng các trường dữ liệu phi cấu trúc JSON (như `content_json` trong bảng levels) để lưu trữ nhanh các câu hỏi AI, mẹo ngữ pháp mà không cần nhiều bảng quan hệ phức tạp. |
+
+#### *So sánh với Phương án cơ sở dữ liệu tập trung (Shared Database)*:
+- **Lý do loại bỏ Shared DB**: Nếu cả hai Service cùng ghi/đọc chung một database, khi lượng người dùng nói chuyện real-time tăng cao, các câu lệnh INSERT/UPDATE phòng học liên tục của Node.js sẽ khóa bảng (Table Lock/Row Lock), dẫn đến treo hoặc gián đoạn các giao dịch ví tiền của .NET. Chia tách DB giúp cô lập lỗi (Fault Isolation) - nếu DB Real-time lỗi, Ví tiền vẫn hoạt động an toàn.
+
+---
+
+### 2.4. Phân tích Các Mẫu Thiết kế Hướng Kiến trúc (Architectural Design Patterns)
+
+Dự án áp dụng các Design Pattern kinh điển giải quyết các bài toán cụ thể:
+
+#### 1. Double-Entry Ledger Pattern (Mẫu Nhật ký sổ kép tài chính)
+- **Áp dụng**: Hệ thống Ví tiền & Donate Creator. Mọi biến động số dư được ghi nhận dưới dạng 2 dòng đối ứng (Ghi nợ `Sender` - Ghi có `Recipient`) trong bảng `WalletLedger`.
+- **So sánh với kiến trúc tương tự (Direct Mutation)**: Việc chỉ dùng `UPDATE Users SET Balance = Balance - X` sẽ phá hủy khả năng kiểm toán dòng tiền và dễ gây Race Condition. Nhật ký sổ kép giúp khôi phục dữ liệu ví 100% trong mọi tình huống sự cố.
+
+#### 2. Finite State Machine Pattern (Máy trạng thái hữu hạn - FSM)
+- **Áp dụng**: Quản lý vòng đời phòng học (`Lobby` $\rightarrow$ `Topic` $\rightarrow$ `Transition` $\rightarrow$ `Closed`).
+- **So sánh với kiến trúc tương tự (Boolean Flags)**: Việc dùng nhiều cờ rời rạc (`isLive`, `isEnded`) rất dễ đưa phòng vào trạng thái lỗi logic (Invalid State). FSM định nghĩa rõ ràng điều kiện chuyển trạng thái, giúp hệ thống hoạt động chính xác tuyệt đối.
+
+#### 3. Policy-Based Authorization Guard (Mẫu Lớp bảo vệ dựa trên chính sách)
+- **Áp dụng**: Khóa phòng vượt cấp (Level Requirement Guard). Tính toán cấp độ dựa trên XP và áp dụng chính sách thử thách tối đa `UserLevel + 3`.
+- **Lợi ích**: Bảo vệ trải nghiệm học viên mới không bị ngợp trong phòng nâng cao, đồng thời giải phóng quyền năng cho SUPER Host để giảng dạy.
 
 ---
 
 ## 3. BẢNG SO SÁNH MA TRẬN QUYẾT ĐỊNH KIẾN TRÚC (DECISION MATRIX)
 
-| Tiêu chí | Monolith Thuần túy | Microservices Thuần túy (Docker/Kubernetes) | **Mô hình Hybrid của LUCY (Lựa chọn)** |
+| Tiêu chí | Kiến trúc Monolith Thuần túy | Microservices Thuần túy (Docker/Kubernetes) | **Mô hình Hybrid của LUCY (Lựa chọn)** |
 | :--- | :--- | :--- | :--- |
 | **Độ phức tạp hạ tầng** | Rất thấp | Rất cao (Cần DevOps/Service Mesh) | **Vừa phải** (Tận dụng Nginx Proxy) |
 | **Tốc độ Real-time** | Trung bình | Tốt (dính độ trễ Inter-service) | **Cực cao** (Node.js + Socket.IO trực tiếp) |
@@ -94,7 +118,4 @@ Hệ thống LUCY sử dụng **Mô hình Thời gian thực hai kênh (Dual-Cha
 
 ## 4. KẾT LUẬN
 
-Việc kết hợp **Kiến trúc Microservices đa ngôn ngữ (Node.js + .NET 9)** cùng **Hệ thống Xử lý Thời gian thực hai kênh (Socket.IO + WebRTC)** giúp dự án **LUCY** giải quyết hoàn hảo bài toán học ngoại ngữ tương tác nhóm:
-- Đảm bảo trải nghiệm nói chuyện mượt mà, phản hồi tức thì dưới 50ms.
-- Bảo mật tuyệt đối dữ liệu tài khoản và số dư ví theo chuẩn ngân hàng.
-- Sẵn sàng mở rộng quy mô (Scale out) từng microservice độc lập khi lượng người dùng tăng cao.
+Kiến trúc phần mềm của dự án **LUCY** được thiết kế dựa trên sự thấu hiểu rõ nét về các ràng buộc phi chức năng (Non-functional Requirements). Việc chia tách dịch vụ đa ngôn ngữ (**C# .NET 9** bảo mật tiền tệ, **Node.js** tối ưu hóa I/O thời gian thực), áp dụng mô hình **Database per Service**, và tối ưu hóa **HTTP 206 Partial Content** đã giúp hệ thống đạt độ trễ cực thấp, trải nghiệm âm thanh mượt mà tuyệt đối và tính bảo mật vững chắc cho người dùng.
